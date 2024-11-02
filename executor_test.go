@@ -120,7 +120,8 @@ func TestCompareFiles(t *testing.T) {
 	}
 }
 
-func TestEnsureShebang(t *testing.T) {
+// TestEnsureShebang ensureShebang 사용하지 않음. 삭제하지 않고  주석으로 남김.
+/*func TestEnsureShebang(t *testing.T) {
 	tests := []struct {
 		input          string
 		expectedOutput string
@@ -136,4 +137,4 @@ func TestEnsureShebang(t *testing.T) {
 			t.Errorf("Unexpected result for ensureShebang. Got: %s, Want: %s", result, test.expectedOutput)
 		}
 	}
-}
+}*/
