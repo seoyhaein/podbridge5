@@ -1,0 +1,15 @@
+FROM alpine:latest
+
+# Work directory 설정
+WORKDIR /app
+
+# 필요한 스크립트 복사
+COPY executor.sh /app/
+COPY healthcheck.sh /app/
+COPY scripts/user_script.sh /app/scripts/
+
+# 파일 권한을 777로 설정
+RUN chmod 777 /app/executor.sh /app/healthcheck.sh /app/scripts/user_script.sh
+
+# executor.sh 실행
+CMD ["/bin/sh", "-c", "/app/executor.sh"]
