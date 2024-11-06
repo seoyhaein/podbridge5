@@ -25,6 +25,14 @@ func NewConnection5(ctx context.Context, ipcName string) (context.Context, error
 	return ctx, err
 }
 
+func NewConnectionLinux5(ctx context.Context) (context.Context, error) {
+
+	socket := defaultLinuxSockDir5()
+	ctx, err := bindings.NewConnection(ctx, socket)
+
+	return ctx, err
+}
+
 func defaultLinuxSockDir5() (socket string) {
 	sockDir := os.Getenv("XDG_RUNTIME_DIR")
 	if sockDir == "" {
@@ -38,12 +46,4 @@ func defaultLinuxSockDir5() (socket string) {
 	}
 	socket = "unix:" + sockDir + "/podman/podman.sock"
 	return
-}
-
-func NewConnectionLinux5(ctx context.Context) (context.Context, error) {
-
-	socket := defaultLinuxSockDir5()
-	ctx, err := bindings.NewConnection(ctx, socket)
-
-	return ctx, err
 }

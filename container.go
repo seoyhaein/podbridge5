@@ -32,16 +32,13 @@ const (
 	None                             // 9
 )
 
-// CreateContainerResult TODO 이 부분 수정할 예정임.
+// CreateContainerResult 컨테이너 생성 정보를 담는 구조체
 type (
 	CreateContainerResult struct {
 		Name     string
 		ID       string
 		Warnings []string
 		Status   ContainerStatus
-
-		// TODO 아래 채널 없애는 방향으로.
-		ch chan ContainerStatus
 	}
 )
 
@@ -79,7 +76,7 @@ func WithHealthChecker(inCmd, interval string, retries uint, timeout, startPerio
 		if err != nil {
 			//TODO important: healthcheck 설정이 실패하면 결국 컨테이너의 상태를 알수 없음으로 중지 시켜야 한다.
 			Log.Errorf("Failed to set healthConfig: %v", err)
-			panic(err) // 또는 적절한 에러 처리 로직을 추가
+			panic(err) //TODO 또는 적절한 에러 처리 로직을 추가
 		}
 		spec.HealthConfig = healthConfig
 	}
@@ -109,8 +106,7 @@ func RunContainer(ctx context.Context, internalImageName, containerName string, 
 	return ccr.ID, nil
 }
 
-// CreateContainer 수정 필요.
-// TODO container.Exists 와 images.Exists, images.Pull, containers.CreateWithSpec 관련하여 version 5 에서 변동 사항 있는지 확인 해야함.
+// CreateContainer 컨테이너 생성
 func CreateContainer(ctx context.Context, conSpec *specgen.SpecGenerator) (*CreateContainerResult, error) {
 	if err := conSpec.Validate(); err != nil {
 		Log.Errorf("validation failed: %v", err)
@@ -207,7 +203,7 @@ func HealthCheckContainer(ctx context.Context, containerId string) (status *stri
 	return
 }
 
-// handleExistingContainer TODO 테스트 필요
+// handleExistingContainer 컨테이너가 존재했을 경우 해당 컨테이너의 정보를 리턴함.
 func handleExistingContainer(ctx context.Context, containerName string) (*CreateContainerResult, error) {
 	containerData, err := containers.Inspect(ctx, containerName, &containers.InspectOptions{Size: utils.PFalse})
 	if err != nil {

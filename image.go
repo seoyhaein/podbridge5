@@ -35,6 +35,13 @@ var (
 	builder *buildah.Builder
 }*/
 
+// 공통 RunOptions 설정
+var defaultRunOptions = buildah.RunOptions{
+	User:      "root",
+	Isolation: define.IsolationOCI,
+	Runtime:   "runc",
+}
+
 // WithArg sets an argument for the build
 func WithArg(key, value string) func(*buildah.BuilderOptions) {
 	return func(opts *buildah.BuilderOptions) {
@@ -581,6 +588,79 @@ func CreateImageWithDockerfile(ctx context.Context, store storage.Store, config 
 	return builder, imageId, nil
 }
 
+func (config *BuildConfig) CreateImageWithDockerfile(ctx context.Context, store storage.Store) (*buildah.Builder, string, error) {
+	ctx, id, err := buildImageFromDockerfile(ctx, config.DockerfilePath)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to build image from Dockerfile: %w", err)
+	}
+
+	// 새로운 빌더 생성
+	ctx, builder, err := newBuilder(ctx, store, id)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to create new builder: %w", err)
+	}
+
+	// 공통 디렉토리 생성 함수 호출
+	directories := []string{"/app", "/app/scripts"}
+	err = createDirectories(builder, directories)
+	if err != nil {
+		return builder, "", fmt.Errorf("failed to create directories: %w", err)
+	}
+
+	// 스크립트 복사
+	scripts := map[string][]string{
+		"/app":         {config.ExecutorShell, config.HealthcheckShell, config.InstallShell},
+		"/app/scripts": {config.UserScriptShell},
+	}
+	err = copyScripts(builder, scripts)
+	if err != nil {
+		return builder, "", fmt.Errorf("failed to copy scripts: %w", err)
+	}
+
+	// 스크립트 권한 설정
+	err = setFilePermissions(builder, []string{
+		"/app/executor.sh",
+		"/app/healthcheck.sh",
+		"/app/install.sh",
+		"/app/scripts/user_script.sh",
+	})
+	if err != nil {
+		return builder, "", fmt.Errorf("failed to set file permissions: %w", err)
+	}
+
+	err = installDependencies(builder)
+	if err != nil {
+		return builder, "", fmt.Errorf("failed to install dependency: %w", err)
+	}
+
+	// CMD 설정 (executor.sh 실행)
+	builder.SetWorkDir("/app")
+	builder.SetCmd([]string{"/bin/sh", "-c", "/app/executor.sh"})
+
+	// 이미지 참조 생성
+	imageRef, err := is.Transport.ParseReference(config.ImageName)
+	if err != nil {
+		return builder, "", fmt.Errorf("failed to parse image reference: %w", err)
+	}
+
+	// 이미지를 커밋
+	imageId, _, _, err := builder.Commit(ctx, imageRef, buildah.CommitOptions{
+		PreferredManifestType: buildah.Dockerv2ImageManifest,
+		SystemContext:         &imageTypes.SystemContext{},
+	})
+	if err != nil {
+		return builder, "", fmt.Errorf("failed to commit image: %w", err)
+	}
+
+	// 이미지를 저장
+	err = saveImage(ctx, config.ImageSavePath, config.ImageName, "", imageId, false)
+	if err != nil {
+		return builder, imageId, fmt.Errorf("failed to save image: %w", err)
+	}
+
+	return builder, imageId, nil
+}
+
 // CreateImage 기본 os 를 바탕으로 제작, 이러한 기본 os 같은 경우도 포함 될 utils 들에 대해서 생각해줘야 함.
 func CreateImage(ctx context.Context, store storage.Store, config BuildConfig) (*buildah.Builder, string, error) {
 
@@ -654,14 +734,80 @@ func CreateImage(ctx context.Context, store storage.Store, config BuildConfig) (
 	return builder, imageId, nil
 }
 
-// 공통 디렉토리 생성 함수
+func (config *BuildConfig) CreateImage(ctx context.Context, store storage.Store) (*buildah.Builder, string, error) {
+	// 새로운 빌더 생성
+	ctx, builder, err := newBuilder(ctx, store, config.SourceImageName)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to create new builder: %w", err)
+	}
+
+	// 공통 디렉토리 생성 함수 호출
+	directories := []string{"/app", "/app/scripts"}
+	err = createDirectories(builder, directories)
+	if err != nil {
+		return builder, "", fmt.Errorf("failed to create directories: %w", err)
+	}
+
+	// 스크립트 복사 (test 용이므로 이후 삭제)
+	scripts := map[string][]string{
+		"/app":         {config.ExecutorShell, config.HealthcheckShell, config.InstallShell},
+		"/app/scripts": {config.UserScriptShell},
+	}
+	err = copyScripts(builder, scripts)
+	if err != nil {
+		return builder, "", fmt.Errorf("failed to copy scripts: %w", err)
+	}
+
+	// 스크립트 권한 설정
+	err = setFilePermissions(builder, []string{
+		"/app/executor.sh",
+		"/app/install.sh",
+		"/app/healthcheck.sh",
+		"/app/scripts/user_script.sh",
+	})
+	if err != nil {
+		return builder, "", fmt.Errorf("failed to set file permissions: %w", err)
+	}
+
+	// 종속성 설치
+	err = installDependencies(builder)
+	if err != nil {
+		return builder, "", fmt.Errorf("failed to install dependency: %w", err)
+	}
+
+	// CMD 설정 (데이터가 없는 기본 이미지를 만들 경우 CMD 설정은 생략해야 함)
+	builder.SetWorkDir("/app")
+	// TODO: 테스트 중임으로 주석 처리 풀었으나 최종 코드에서는 CMD 제거 필요
+	builder.SetCmd([]string{"/bin/sh", "-c", "/app/executor.sh"})
+
+	// 이미지 참조 생성
+	imageRef, err := is.Transport.ParseReference(config.ImageName)
+	if err != nil {
+		return builder, "", fmt.Errorf("failed to parse image reference: %w", err)
+	}
+
+	// 이미지를 커밋
+	imageId, _, _, err := builder.Commit(ctx, imageRef, buildah.CommitOptions{
+		PreferredManifestType: buildah.Dockerv2ImageManifest,
+		SystemContext:         &imageTypes.SystemContext{},
+	})
+	if err != nil {
+		return builder, "", fmt.Errorf("failed to commit image: %w", err)
+	}
+
+	// 이미지를 저장
+	err = saveImage(ctx, config.ImageSavePath, config.ImageName, "", imageId, false)
+	if err != nil {
+		return builder, imageId, fmt.Errorf("failed to save image: %w", err)
+	}
+
+	return builder, imageId, nil
+}
+
+// createDirectories 공통 디렉토리 생성 함수
 func createDirectories(builder *buildah.Builder, dirs []string) error {
 	for _, dir := range dirs {
-		err := builder.Run([]string{"mkdir", "-p", dir}, buildah.RunOptions{
-			User:      "root",
-			Isolation: define.IsolationOCI,
-			Runtime:   "runc",
-		})
+		err := builder.Run([]string{"mkdir", "-p", dir}, defaultRunOptions)
 		if err != nil {
 			return fmt.Errorf("failed to create directory %s: %w", dir, err)
 		}
@@ -669,7 +815,27 @@ func createDirectories(builder *buildah.Builder, dirs []string) error {
 	return nil
 }
 
-// 스크립트 복사 함수
+// setFilePermissions 파일 권한 설정 함수
+func setFilePermissions(builder *buildah.Builder, files []string) error {
+	chmodArgs := append([]string{"chmod", "777"}, files...)
+	err := builder.Run(chmodArgs, defaultRunOptions)
+	if err != nil {
+		return fmt.Errorf("failed to set file permissions: %w", err)
+	}
+	return nil
+}
+
+// installDependencies install.sh 실행
+func installDependencies(builder *buildah.Builder) error {
+	chmodArgs := []string{"/app/install.sh"}
+	err := builder.Run(chmodArgs, defaultRunOptions)
+	if err != nil {
+		return fmt.Errorf("failed to run install.sh: %w", err)
+	}
+	return nil
+}
+
+// copyScripts 스크립트 복사 함수
 func copyScripts(builder *buildah.Builder, scripts map[string][]string) error {
 	options := newAddAndCopyOptions()
 	for dest, srcList := range scripts {
@@ -679,34 +845,6 @@ func copyScripts(builder *buildah.Builder, scripts map[string][]string) error {
 				return fmt.Errorf("failed to copy script %s to %s: %w", src, dest, err)
 			}
 		}
-	}
-	return nil
-}
-
-// 파일 권한 설정 함수
-func setFilePermissions(builder *buildah.Builder, files []string) error {
-	chmodArgs := append([]string{"chmod", "777"}, files...)
-	err := builder.Run(chmodArgs, buildah.RunOptions{
-		User:      "root",
-		Isolation: define.IsolationOCI,
-		Runtime:   "runc",
-	})
-	if err != nil {
-		return fmt.Errorf("failed to set file permissions: %w", err)
-	}
-	return nil
-}
-
-// install.sh 실행
-func installDependencies(builder *buildah.Builder) error {
-	chmodArgs := []string{"/app/install.sh"}
-	err := builder.Run(chmodArgs, buildah.RunOptions{
-		User:      "root",
-		Isolation: define.IsolationOCI,
-		Runtime:   "runc",
-	})
-	if err != nil {
-		return fmt.Errorf("failed to run install.sh: %w", err)
 	}
 	return nil
 }
