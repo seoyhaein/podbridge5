@@ -15,7 +15,6 @@ import (
 )
 
 func NewConnection5(ctx context.Context, ipcName string) (context.Context, error) {
-
 	if utils.IsEmptyString(ipcName) {
 		Log.Error("ipcName cannot be an empty string")
 		return nil, errors.New("ipcName cannot be an empty string")
@@ -26,7 +25,6 @@ func NewConnection5(ctx context.Context, ipcName string) (context.Context, error
 }
 
 func NewConnectionLinux5(ctx context.Context) (context.Context, error) {
-
 	socket := defaultLinuxSockDir5()
 	ctx, err := bindings.NewConnection(ctx, socket)
 
