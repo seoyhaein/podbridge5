@@ -372,7 +372,7 @@ type BuildConfig struct {
 
 // CreateImageWithDockerfile2 builds an image using Dockerfile and then copies required scripts.
 func CreateImageWithDockerfile2(ctx context.Context, store storage.Store, config BuildConfig) (*buildah.Builder, string, error) {
-	// Dockerfile로부터 이미지를 빌드 (alpine 이미지 사용)
+	// Dockerfile 로부터 이미지를 빌드 (alpine 이미지 사용)
 	ctx, id, err := buildImageFromDockerfile(ctx, config.DockerfilePath)
 	if err != nil {
 		Log.Errorf("Failed to build image from Dockerfile: %v", err)
@@ -843,7 +843,7 @@ func saveImage(ctx context.Context, path, imageName, imageTag, imageId string, c
 	var writer io.Writer = outputFile
 
 	if compress {
-		// gzip.Writer를 사용하여 데이터를 압축
+		// gzip.Writer 를 사용하여 데이터를 압축
 		gzipWriter := gzip.NewWriter(outputFile)
 		defer func() {
 			if err := gzipWriter.Close(); err != nil {
