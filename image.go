@@ -347,19 +347,6 @@ func newAddAndCopyOptions() buildah.AddAndCopyOptions {
 // BuildConfig and Image Creation Functions
 // ------------------------------------------------------
 
-// BuildConfig holds configuration for building an image.
-type BuildConfig struct {
-	HealthcheckDir   string
-	SourceImageName  string
-	ImageName        string
-	ImageSavePath    string
-	HealthcheckShell string
-	DockerfilePath   string
-	ExecutorShell    string ``
-	UserScriptShell  string
-	InstallShell     string
-}
-
 /*
    // CreateImageWithDockerfile1 TODO: 수정 해야 함. 아직 최적화 하지 않음.
    // TODO: 이건 Dockerfile 과 동일하게 나와야 함. => Dockerfile.alpine.executor
@@ -760,6 +747,120 @@ func (config *BuildConfig) CreateImage(ctx context.Context, store storage.Store)
 	// 이미지를 저장
 	err = saveImage(ctx, config.ImageSavePath, config.ImageName, "", imageId, false)
 	if err != nil {
+		return builder, imageId, fmt.Errorf("failed to save image: %w", err)
+	}
+
+	return builder, imageId, nil
+}
+
+func (config *BuildConfig) CreateImage1(ctx context.Context, store storage.Store) (*buildah.Builder, string, error) {
+	// 새로운 빌더 생성 (SourceImageName을 기반으로)
+	ctx, builder, err := newBuilder(ctx, store, config.SourceImageName)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to create new builder: %w", err)
+	}
+
+	// BuildSettings에 지정된 공통 디렉토리 생성
+	err = createDirectories(builder, config.BuildSettings.Directories)
+	if err != nil {
+		return builder, "", fmt.Errorf("failed to create directories: %w", err)
+	}
+
+	// BuildSettings에 지정된 스크립트 복사
+	err = copyScripts(builder, config.BuildSettings.ScriptMap)
+	if err != nil {
+		return builder, "", fmt.Errorf("failed to copy scripts: %w", err)
+	}
+
+	// BuildSettings에 지정된 파일 권한 설정
+	err = setFilePermissions(builder, config.BuildSettings.PermissionFiles)
+	if err != nil {
+		return builder, "", fmt.Errorf("failed to set file permissions: %w", err)
+	}
+
+	// 종속성 설치
+	err = installDependencies(builder)
+	if err != nil {
+		return builder, "", fmt.Errorf("failed to install dependency: %w", err)
+	}
+
+	// 작업 디렉토리 및 CMD 설정
+	builder.SetWorkDir(config.BuildSettings.WorkDir)
+	builder.SetCmd(config.BuildSettings.CMD)
+
+	// 이미지 참조 생성
+	imageRef, err := is.Transport.ParseReference(config.ImageName)
+	if err != nil {
+		return builder, "", fmt.Errorf("failed to parse image reference: %w", err)
+	}
+
+	// 이미지를 커밋
+	imageId, _, _, err := builder.Commit(ctx, imageRef, buildah.CommitOptions{
+		PreferredManifestType: buildah.Dockerv2ImageManifest,
+		SystemContext:         &imageTypes.SystemContext{},
+	})
+	if err != nil {
+		return builder, "", fmt.Errorf("failed to commit image: %w", err)
+	}
+
+	// 이미지를 저장
+	err = saveImage(ctx, config.ImageSavePath, config.ImageName, "", imageId, false)
+	if err != nil {
+		return builder, imageId, fmt.Errorf("failed to save image: %w", err)
+	}
+
+	return builder, imageId, nil
+}
+
+// CreateImage2 메서드는 BuildSettings에 설정된 값들을 반영하여 이미지를 생성합니다.
+func (config *BuildConfig) CreateImage2(ctx context.Context, store storage.Store) (*buildah.Builder, string, error) {
+	// 새로운 빌더 생성 (SourceImageName을 베이스 이미지로 사용)
+	ctx, builder, err := newBuilder(ctx, store, config.SourceImageName)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to create new builder: %w", err)
+	}
+
+	// BuildSettings.Directories에 지정된 디렉토리 생성
+	if err = createDirectories(builder, config.BuildSettings.Directories); err != nil {
+		return builder, "", fmt.Errorf("failed to create directories: %w", err)
+	}
+
+	// BuildSettings.ScriptMap에 지정된 스크립트 복사
+	if err = copyScripts(builder, config.BuildSettings.ScriptMap); err != nil {
+		return builder, "", fmt.Errorf("failed to copy scripts: %w", err)
+	}
+
+	// BuildSettings.PermissionFiles에 지정된 파일 권한 설정
+	if err = setFilePermissions(builder, config.BuildSettings.PermissionFiles); err != nil {
+		return builder, "", fmt.Errorf("failed to set file permissions: %w", err)
+	}
+
+	// 종속성 설치
+	if err = installDependencies(builder); err != nil {
+		return builder, "", fmt.Errorf("failed to install dependency: %w", err)
+	}
+
+	// 작업 디렉토리 및 CMD 설정 (BuildSettings.WorkDir, CMD)
+	builder.SetWorkDir(config.BuildSettings.WorkDir)
+	builder.SetCmd(config.BuildSettings.CMD)
+
+	// 이미지 참조 생성 (ImageName을 기반으로)
+	imageRef, err := is.Transport.ParseReference(config.ImageName)
+	if err != nil {
+		return builder, "", fmt.Errorf("failed to parse image reference: %w", err)
+	}
+
+	// 이미지를 커밋
+	imageId, _, _, err := builder.Commit(ctx, imageRef, buildah.CommitOptions{
+		PreferredManifestType: buildah.Dockerv2ImageManifest,
+		SystemContext:         &imageTypes.SystemContext{},
+	})
+	if err != nil {
+		return builder, "", fmt.Errorf("failed to commit image: %w", err)
+	}
+
+	// 이미지를 저장
+	if err = saveImage(ctx, config.ImageSavePath, config.ImageName, "", imageId, false); err != nil {
 		return builder, imageId, fmt.Errorf("failed to save image: %w", err)
 	}
 

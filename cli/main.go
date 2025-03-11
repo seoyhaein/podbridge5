@@ -122,7 +122,7 @@ exit 0`
 	// TODO: 문서화 하고 docker.io/library 나 localhost 등의 설정등도 담자.
 	// TODO: 이름을 UserSettings 라고 잡아두자. 고정되는 값들도 있다. 고정되는 값들은 외부에서 접근 안되도록 하는 것을 생각하자.
 	// TODO: (중요)경로의 문제가 있다. 지금 경로는 소스 위치에 따른 경로로 잡힌다. 다만 향후 main 내용이 합쳐질 것이기 때문에 그때 생각해보자
-	config := &pbr.BuildConfig{
+	/*config := &pbr.BuildConfig{
 		SourceImageName:  "docker.io/library/alpine:latest",
 		HealthcheckDir:   "/app/healthcheck",
 		ImageSavePath:    "/opt/images",
@@ -132,11 +132,11 @@ exit 0`
 		ExecutorShell:    "./executor.sh",
 		UserScriptShell:  "./scripts/user_script.sh",
 		InstallShell:     "./install.sh",
-	}
-
+	}*/
+	config := pbr.NewConfig("docker.io/library/alpine:latest")
 	//builder, imageId, err := config.CreateImageWithDockerfile(ctx, store)
 	// TODO 수정해줘야 함. 또는 wrapper method 를 만들어줘야 함.
-	builder, imageId, err := config.CreateImage(ctx, store)
+	builder, imageId, err := config.CreateImage3(ctx)
 	if err != nil {
 		log.Fatalf("Failed to create image: %v\n", err)
 	}
