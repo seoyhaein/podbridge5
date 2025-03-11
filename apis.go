@@ -59,7 +59,6 @@ func Shutdown() error {
 	if pbStore == nil {
 		return fmt.Errorf("pbStore is nil")
 	}
-	// TODO ShutDown 을 shutdown 으로 고쳤는데 생각해보자.
 	return shutdown(pbStore, false)
 }
 

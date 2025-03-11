@@ -201,8 +201,8 @@ func compareFiles(file1, file2 string) (bool, error) {
 }
 
 // ProcessScript use_script.sh 만들어 주는 메서드
-// TODO ProcessScript(testScript, "./scripts/") 이런식으로 해야하는데 이건 개선하는 방향으로 하자.
 func ProcessScript(scriptContent string, path string) (string, error) {
+	path, _ = utils.CheckPath(path)
 	// 디렉토리가 존재하지 않으면 생성
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		if err := os.MkdirAll(path, 0755); err != nil {

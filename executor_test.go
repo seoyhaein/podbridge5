@@ -119,22 +119,3 @@ func TestCompareFiles(t *testing.T) {
 		t.Errorf("Expected files to be different, but they are the same")
 	}
 }
-
-// TestEnsureShebang ensureShebang 사용하지 않음. 삭제하지 않고  주석으로 남김.
-/*func TestEnsureShebang(t *testing.T) {
-	tests := []struct {
-		input          string
-		expectedOutput string
-	}{
-		{"#!/bin/bash\necho 'Hello, World!'", "#!/bin/bash\necho 'Hello, World!'"},
-		{"\n#!/bin/bash\necho 'Hello, World!'", "#!/bin/bash\necho 'Hello, World!'"},
-		{"echo 'Hello, World!'", "#!/bin/sh\necho 'Hello, World!'"}, // 기본 shebang이 추가되어야 함
-	}
-
-	for _, test := range tests {
-		result := ensureShebang(test.input)
-		if result != test.expectedOutput {
-			t.Errorf("Unexpected result for ensureShebang. Got: %s, Want: %s", result, test.expectedOutput)
-		}
-	}
-}*/

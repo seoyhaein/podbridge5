@@ -9,7 +9,7 @@ require (
 	github.com/containers/podman/v5 v5.2.1
 	github.com/containers/storage v1.55.0
 	github.com/opencontainers/go-digest v1.0.0
-	github.com/seoyhaein/utils v0.0.3
+	github.com/seoyhaein/utils v0.0.6
 	github.com/sirupsen/logrus v1.9.3
 )
 
