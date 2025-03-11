@@ -55,20 +55,25 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to establish connection: %v\n", err)
 	}*/
+	defer func() {
+		err := pbr.Shutdown()
+		if err != nil {
 
+		}
+	}()
 	// 일단 에러 발생하니까. 이렇게 만들어줌.
 	ctx := context.Background()
 
 	// 여기서 부터는 컨테이너 나 이제 이미지 파트이다.
 	// 컨테이너나 이미지는 여러개 생성 및 삭제가 가능하다라는 사실을 잊으면 안된다.
-	store, err := pbr.NewStore()
+	/*store, err := pbr.NewStore()
 	if err != nil {
 		log.Fatalf("Failed to create store: %v\n", err)
-	}
+	}*/
 
 	// 여기서는 defer 를 해줬지만 컨테이너 레벨에서는 defer 를 해당 컨테이너를 제작하는 메서드에서 해주면 됨.
 	// 여기서는 defer 에서 처리하는 메서드의 에러처리를 하지 않는다. 필요없어서.
-	defer pbr.ShutDown(store, false)
+	//defer pbr.ShutDown(store, false)
 	//defer store.Shutdown(false)
 
 	// TODO 따로 깔끔하게 정리할 필요가 있음.
@@ -131,6 +136,7 @@ exit 0`
 	}
 
 	//builder, imageId, err := config.CreateImageWithDockerfile(ctx, store)
+	// TODO 수정해줘야 함. 또는 wrapper method 를 만들어줘야 함.
 	builder, imageId, err := config.CreateImage(ctx, store)
 	if err != nil {
 		log.Fatalf("Failed to create image: %v\n", err)

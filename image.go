@@ -23,97 +23,110 @@ import (
 var (
 	digester = digest.Canonical.Digester()
 
+	defaultRunOptions = buildah.RunOptions{
+		User:      "root",
+		Isolation: define.IsolationOCI,
+		Runtime:   "runc",
+	}
+
 	// 사용하지 않음 주석처리함. 삭제하지 않음.
 	/*	Verbose = true
 		Debug   = true*/
-
 )
 
-// 사용하지 않음 주석 처리함. 삭제하지 않음.
-/*type Builder struct {
-	store   storage.Store
-	builder *buildah.Builder
-}*/
+// ------------------------------------------------------
+// Functional Options for buildah.BuilderOptions
+// ------------------------------------------------------
 
-// 공통 RunOptions 설정
-var defaultRunOptions = buildah.RunOptions{
-	User:      "root",
-	Isolation: define.IsolationOCI,
-	Runtime:   "runc",
-}
+type BuilderOption func(*buildah.BuilderOptions) error
 
-// WithArg sets an argument for the build
-func WithArg(key, value string) func(*buildah.BuilderOptions) {
-	return func(opts *buildah.BuilderOptions) {
+// WithArg sets an argument for the build. 함수 수정: 에러 발생 시 이를 반환
+func WithArg(key, value string) BuilderOption {
+	return func(opts *buildah.BuilderOptions) error {
 		if opts.Args == nil {
 			opts.Args = make(map[string]string)
 		}
 		if _, ok := opts.Args[key]; !ok {
 			opts.Args[key] = value
 		}
+		return nil
 	}
 }
 
-// WithFromImage sets the base image for the build
-func WithFromImage(image string) func(*buildah.BuilderOptions) {
-	return func(opts *buildah.BuilderOptions) {
-		if !utils.IsEmptyString(image) {
-			opts.FromImage = image
+// WithFromImage sets the base image for the build. 함수 수정: 에러 발생 시 이를 반환
+func WithFromImage(image string) BuilderOption {
+	return func(opts *buildah.BuilderOptions) error {
+		if utils.IsEmptyString(image) {
+			return fmt.Errorf("from image cannot be empty")
 		}
+		opts.FromImage = image
+		return nil
 	}
 }
 
-// WithIsolation sets the isolation mode for the builder options.
-func WithIsolation(isolation define.Isolation) func(*buildah.BuilderOptions) {
-	return func(opts *buildah.BuilderOptions) {
+// WithIsolation sets the isolation mode for the builder options. 함수 수정: 에러 발생 시 이를 반환
+func WithIsolation(isolation define.Isolation) BuilderOption {
+	return func(opts *buildah.BuilderOptions) error {
 		opts.Isolation = isolation
+		return nil
 	}
 }
 
-// WithCommonBuildOptions sets the common build options such as CPU and memory limits.
-func WithCommonBuildOptions(options *buildah.CommonBuildOptions) func(*buildah.BuilderOptions) {
-	return func(opts *buildah.BuilderOptions) {
+// WithCommonBuildOptions sets the common build options such as CPU and memory limits. 함수 수정: 에러 발생 시 이를 반환
+// TODO 확인하자.
+func WithCommonBuildOptions(options *buildah.CommonBuildOptions) BuilderOption {
+	return func(opts *buildah.BuilderOptions) error {
 		if options != nil {
 			opts.CommonBuildOpts = options
 		} else {
 			opts.CommonBuildOpts = &buildah.CommonBuildOptions{}
 		}
+		return nil
 	}
 }
 
-// WithSystemContext sets the system context for the builder options.
-func WithSystemContext(sysCtx *imageTypes.SystemContext) func(*buildah.BuilderOptions) {
-	return func(opts *buildah.BuilderOptions) {
+// WithSystemContext sets the system context for the builder options. 함수 수정: 에러 발생 시 이를 반환
+// TODO 확인하자.
+func WithSystemContext(sysCtx *imageTypes.SystemContext) BuilderOption {
+	return func(opts *buildah.BuilderOptions) error {
 		if sysCtx != nil {
 			opts.SystemContext = sysCtx
 		} else {
 			opts.SystemContext = &imageTypes.SystemContext{}
 		}
+		return nil
 	}
 }
 
-// WithNetworkConfiguration sets the network configuration policy for the builder options.
-func WithNetworkConfiguration(policy define.NetworkConfigurationPolicy) func(*buildah.BuilderOptions) {
-	return func(opts *buildah.BuilderOptions) {
+// WithNetworkConfiguration sets the network configuration policy for the builder options. 함수 수정: 에러 발생 시 이를 반환
+func WithNetworkConfiguration(policy define.NetworkConfigurationPolicy) BuilderOption {
+	return func(opts *buildah.BuilderOptions) error {
 		opts.ConfigureNetwork = policy
+		return nil
 	}
 }
 
-// WithFormat sets the format for the container image to be committed.
-func WithFormat(format string) func(*buildah.BuilderOptions) {
-	return func(opts *buildah.BuilderOptions) {
+// WithFormat sets the format for the container image to be committed. 함수 수정: 에러 발생 시 이를 반환
+func WithFormat(format string) BuilderOption {
+	return func(opts *buildah.BuilderOptions) error {
 		opts.Format = format
+		return nil
 	}
 }
 
-// WithCapabilities Container 에서 Run 해줄려면 root 권한 줘야 함.
-func WithCapabilities() func(*buildah.BuilderOptions) {
-	return func(opts *buildah.BuilderOptions) {
-		cap, _ := capabilities()
-		opts.Capabilities = cap
+// WithCapabilities sets capabilities needed for running as root in a container. 함수 수정: 에러 발생 시 이를 반환
+func WithCapabilities() BuilderOption {
+	return func(opts *buildah.BuilderOptions) error {
+		caps, err := capabilities()
+		if err != nil {
+			return fmt.Errorf("failed to get capabilities: %w", err)
+		}
+		opts.Capabilities = caps
+		return nil
 	}
 }
 
+// capabilities returns the default capabilities for root.
 func capabilities() ([]string, error) {
 	conf, err := config.Default()
 	if err != nil {
@@ -127,19 +140,22 @@ func capabilities() ([]string, error) {
 	return capabilitiesForRoot, nil
 }
 
-// NewBuilder creates a new Builder with the specified options
-func NewBuilder(ctx context.Context, store storage.Store, opts ...func(*buildah.BuilderOptions)) (context.Context, *buildah.Builder, error) {
-	// Create a new BuilderOptions with the provided settings
+// ------------------------------------------------------
+// Core Builder/Store Functions
+// ------------------------------------------------------
+
+// NewBuilder creates a new Builder with the specified options, 함수 수정: 각 옵션을 적용할 때 에러를 확인
+func NewBuilder(ctx context.Context, store storage.Store, opts ...BuilderOption) (context.Context, *buildah.Builder, error) {
 	builderOpts := &buildah.BuilderOptions{}
 	for _, applyOpt := range opts {
-		applyOpt(builderOpts)
+		if err := applyOpt(builderOpts); err != nil {
+			return nil, nil, err
+		}
 	}
-	// Create the buildah.Builder
 	builder, err := buildah.NewBuilder(ctx, store, *builderOpts)
 	if err != nil {
 		return nil, nil, err
 	}
-
 	return ctx, builder, nil
 }
 
@@ -168,9 +184,9 @@ func NewStore() (storage.Store, error) {
 	return buildStore, nil
 }
 
-// ShutDown force 를 true 로 잡아주면 다른 컨테이너에게도 영향을 줄 수 있음.
+// shutdown force 를 true 로 잡아주면 다른 컨테이너에게도 영향을 줄 수 있음.
 // 기본적으로 false 를 유지하도록 하고, 모든 컨테이너가 종료되어 다른 레이어를 사용하지 않는다면 true 로 해줄 수 있음.
-func ShutDown(store storage.Store, force bool) error {
+func shutdown(store storage.Store, force bool) error {
 	if store == nil {
 		return fmt.Errorf("storage.Store is nil")
 	}
@@ -180,6 +196,10 @@ func ShutDown(store storage.Store, force bool) error {
 	}
 	return nil
 }
+
+// ------------------------------------------------------
+// Functional Options for buildah.AddAndCopyOptions
+// ------------------------------------------------------
 
 // WithChmod sets the Chmod option for AddAndCopyOptions.
 func WithChmod(chmod string) func(*buildah.AddAndCopyOptions) {
@@ -274,6 +294,10 @@ func NewAddAndCopyOptions(opts ...func(*buildah.AddAndCopyOptions)) buildah.AddA
 	return *options
 }
 
+// ------------------------------------------------------
+// Image Build Helper Functions
+// ------------------------------------------------------
+
 // buildImageFromDockerfile builds an image from the provided Dockerfile
 func buildImageFromDockerfile(ctx context.Context, dockerfilePath string) (context.Context, string, error) {
 	// Define build options
@@ -295,8 +319,8 @@ func buildImageFromDockerfile(ctx context.Context, dockerfilePath string) (conte
 	return ctx, r.ID, nil
 }
 
-// TODO 옵션 확인해보자.
-// 아래 함수들을 따로 정리해서 모아두자.
+// newBuilder creates a new builder using the NewBuilder function with default options.
+// TODO 좀더 study 필요. 옵션들에 대해서.
 func newBuilder(ctx context.Context, store storage.Store, idname string) (context.Context, *buildah.Builder, error) {
 	return NewBuilder(ctx, store,
 		WithFromImage(idname),
@@ -308,7 +332,7 @@ func newBuilder(ctx context.Context, store storage.Store, idname string) (contex
 		WithCapabilities())
 }
 
-// newAddAndCopyOptions 컨테이너 내부에서 루트 권한으로 아래와 같이 실행 함.
+// newAddAndCopyOptions creates default add and copy options.
 func newAddAndCopyOptions() buildah.AddAndCopyOptions {
 	return NewAddAndCopyOptions(
 		WithChmod("0755"),
@@ -319,6 +343,11 @@ func newAddAndCopyOptions() buildah.AddAndCopyOptions {
 	)
 }
 
+// ------------------------------------------------------
+// BuildConfig and Image Creation Functions
+// ------------------------------------------------------
+
+// BuildConfig holds configuration for building an image.
 type BuildConfig struct {
 	HealthcheckDir   string
 	SourceImageName  string
@@ -332,79 +361,16 @@ type BuildConfig struct {
 }
 
 /*
-// CreateImageWithDockerfile1 TODO: 수정 해야 함. 아직 최적화 하지 않음.
-// TODO: 이건 Dockerfile 과 동일하게 나와야 함. => Dockerfile.alpine.executor
-// TODO: 이 메서드는 개념이 혼재 되어 있는데 Dockerfile 을 사용자가 작성한 경우에 해당한다. 만약 사용자가 os 만 선택한 경우도 생각해야 한다. 이름을 CreateImageWithDockerfile 이라고 하자.
-// TODO: 다른 건 CreateImage 라고 하자.
-func CreateImageWithDockerfile1(ctx context.Context, store storage.Store, archive string, config BuildConfig) (*buildah.Builder, string, error) {
-	// Dockerfile로부터 이미지를 빌드
-	ctx, id, err := buildImageFromDockerfile(ctx, config.DockerfilePath)
-	if err != nil {
-		Log.Errorf("Failed to build image from Dockerfile: %v", err)
-		return nil, "", err
-	}
-
-	// 새로운 빌더 생성
-	ctx, builder, err := newBuilder(ctx, store, id)
-	if err != nil {
-		Log.Errorf("Failed to create new builder: %v", err)
-		return nil, "", err
-	}
-
-	// /app/healthcheck 디렉토리 생성
-	// TODO: User: "root" 이거 생각 해야 함. 루트리스와 루트 구분해줘야 하는데 이게 어떤 영향을 미치는 지 테스트 해봐야 함.
-	err = builder.Run([]string{"mkdir", "-p", config.HealthcheckDir}, buildah.RunOptions{
-		User:      "root",
-		Isolation: define.IsolationOCI,
-		Runtime:   "runc",
-	})
-	if err != nil {
-		Log.Errorf("Failed to create %s directory: %v", config.HealthcheckDir, err)
-		return builder, "", fmt.Errorf("failed to create %s directory: %w", config.HealthcheckDir, err)
-	}
-	// /app workdir 설정
-	builder.SetWorkDir("/app")
-
-	// healthChecker 파일 추가
-	// ADD 로 했는데 COPY 로 바꾸자.
-	options := newAddAndCopyOptions()
-	err = builder.Add(config.HealthcheckDir, false, options, config.HealthcheckShell)
-	if err != nil {
-		Log.Errorf("Failed to add health checker to %s: %v", config.HealthcheckDir, err)
-		return builder, "", fmt.Errorf("failed to add health checker to %s: %w", config.HealthcheckDir, err)
-	}
-
-	// 이미지 참조 생성
-	// TODO: archive 같은 경우는 사용자의 user_script.sh 에 따라 이름을 바꿔야 할듯. os_스크립트이름 으로 하자.
-	// TODO: 일단 해당 스크립트는 user_script.sh 를 변경시키는 것이 아닌 이미지를 변경시키는 것으로 한다.
-	// TODO: docker.io 로 고정했는데 localhost 로 할지 다른 것로 할지 사용자가 정하도록 하자.
-	imageRef, err := is.Transport.ParseReference("docker.io/" + archive)
-	if err != nil {
-		Log.Errorf("Failed to parse image reference: %v", err)
-		return builder, "", fmt.Errorf("failed to parse image reference: %w", err)
-	}
-
-	// 이미지를 커밋
-	imageId, _, _, err := builder.Commit(ctx, imageRef, buildah.CommitOptions{
-		PreferredManifestType: buildah.Dockerv2ImageManifest,
-		SystemContext:         &imageTypes.SystemContext{},
-	})
-	if err != nil {
-		Log.Errorf("Failed to commit image: %v", err)
-		return builder, "", fmt.Errorf("failed to commit image: %w", err)
-	}
-
-	// 이미지를 저장
-	err = saveImage(ctx, config.ImageSavePath, "custom", "", imageId, false)
-	if err != nil {
-		Log.Errorf("Failed to save image: %v", err)
-		return builder, imageId, fmt.Errorf("failed to save image: %w", err)
-	}
-
-	return builder, imageId, nil
-}
+   // CreateImageWithDockerfile1 TODO: 수정 해야 함. 아직 최적화 하지 않음.
+   // TODO: 이건 Dockerfile 과 동일하게 나와야 함. => Dockerfile.alpine.executor
+   // TODO: 이 메서드는 개념이 혼재 되어 있는데 Dockerfile 을 사용자가 작성한 경우에 해당한다. 만약 사용자가 os 만 선택한 경우도 생각해야 한다. 이름을 CreateImageWithDockerfile 이라고 하자.
+   // TODO: 다른 건 CreateImage 라고 하자.
+   func CreateImageWithDockerfile1(ctx context.Context, store storage.Store, archive string, config BuildConfig) (*buildah.Builder, string, error) {
+       // ...
+   }
 */
 
+// CreateImageWithDockerfile2 builds an image using Dockerfile and then copies required scripts.
 func CreateImageWithDockerfile2(ctx context.Context, store storage.Store, config BuildConfig) (*buildah.Builder, string, error) {
 	// Dockerfile로부터 이미지를 빌드 (alpine 이미지 사용)
 	ctx, id, err := buildImageFromDockerfile(ctx, config.DockerfilePath)
@@ -480,7 +446,6 @@ func CreateImageWithDockerfile2(ctx context.Context, store storage.Store, config
 	builder.SetCmd([]string{"/bin/sh", "-c", "/app/executor.sh"})
 
 	// 이미지 참조 생성
-	//imageRef, err := is.Transport.ParseReference("docker.io/" + archive)
 	imageRef, err := is.Transport.ParseReference(config.ImageName)
 	if err != nil {
 		Log.Errorf("Failed to parse image reference: %v", err)
@@ -507,10 +472,7 @@ func CreateImageWithDockerfile2(ctx context.Context, store storage.Store, config
 	return builder, imageId, nil
 }
 
-// CreateImageWithDockerfile TODO: 테스트 진행 해야 함.
-// TODO: 여기서 사용된 ImageName 은 사용자에게 보여줘야 함. 하지만 노출은 하지 않음. DB 로 저장
-// TODO: string 으로 저장한 것 config 로 빼자.
-// TODO: buildImageFromDockerfile 테스트 진행
+// CreateImageWithDockerfile builds an image from a Dockerfile and performs additional steps.
 func CreateImageWithDockerfile(ctx context.Context, store storage.Store, config BuildConfig) (*buildah.Builder, string, error) {
 	ctx, id, err := buildImageFromDockerfile(ctx, config.DockerfilePath)
 	if err != nil {
@@ -530,7 +492,6 @@ func CreateImageWithDockerfile(ctx context.Context, store storage.Store, config 
 		return builder, "", fmt.Errorf("failed to create directories: %w", err)
 	}
 	// 이때 이미 user_script.sh, healthcheck.sh, executor.sh 이 만들어져 있어야 함.
-	// TODO: 해당 파일이 있는지 검사해야함.
 	// 스크립트 복사
 	scripts := map[string][]string{
 		"/app":         {config.ExecutorShell, config.HealthcheckShell, config.InstallShell},
@@ -559,7 +520,6 @@ func CreateImageWithDockerfile(ctx context.Context, store storage.Store, config 
 	}
 
 	// CMD 설정 (executor.sh 실행)
-	// TODO: 데이터가 없는 이미지를 만들때는 CMD 는 없어야 한다. 데이터가 들어간 이미지를 만들어 주는 메서드를 만들때 넣어준다.
 	builder.SetWorkDir("/app")
 	// TODO: 테스트 때문에 주석 풀음. 여기서는 이거 풀면 안됨. 즉, 여기서는 컨테이너 만들면 안됨.
 	builder.SetCmd([]string{"/bin/sh", "-c", "/app/executor.sh"})
@@ -588,6 +548,7 @@ func CreateImageWithDockerfile(ctx context.Context, store storage.Store, config 
 	return builder, imageId, nil
 }
 
+// (BuildConfig) CreateImageWithDockerfile builds an image from a Dockerfile using the BuildConfig method.
 func (config *BuildConfig) CreateImageWithDockerfile(ctx context.Context, store storage.Store) (*buildah.Builder, string, error) {
 	ctx, id, err := buildImageFromDockerfile(ctx, config.DockerfilePath)
 	if err != nil {
@@ -620,8 +581,8 @@ func (config *BuildConfig) CreateImageWithDockerfile(ctx context.Context, store 
 	// 스크립트 권한 설정
 	err = setFilePermissions(builder, []string{
 		"/app/executor.sh",
-		"/app/healthcheck.sh",
 		"/app/install.sh",
+		"/app/healthcheck.sh",
 		"/app/scripts/user_script.sh",
 	})
 	if err != nil {
@@ -661,7 +622,7 @@ func (config *BuildConfig) CreateImageWithDockerfile(ctx context.Context, store 
 	return builder, imageId, nil
 }
 
-// CreateImage 기본 os 를 바탕으로 제작, 이러한 기본 os 같은 경우도 포함 될 utils 들에 대해서 생각해줘야 함.
+// CreateImage creates an image based on a default OS.
 func CreateImage(ctx context.Context, store storage.Store, config BuildConfig) (*buildah.Builder, string, error) {
 
 	ctx, builder, err := newBuilder(ctx, store, config.SourceImageName)
@@ -678,7 +639,7 @@ func CreateImage(ctx context.Context, store storage.Store, config BuildConfig) (
 
 	// 스크립트 복사 test 진행 중 이후 삭제해야 함.
 	scripts := map[string][]string{
-		"/app":         {config.ExecutorShell, config.HealthcheckShell, config.InstallShell}, // 두 개의 스크립트를 같은 경로에 복사
+		"/app":         {config.ExecutorShell, config.HealthcheckShell, config.InstallShell},
 		"/app/scripts": {config.UserScriptShell},
 	}
 
@@ -734,6 +695,7 @@ func CreateImage(ctx context.Context, store storage.Store, config BuildConfig) (
 	return builder, imageId, nil
 }
 
+// (BuildConfig) CreateImage creates an image based on BuildConfig.
 func (config *BuildConfig) CreateImage(ctx context.Context, store storage.Store) (*buildah.Builder, string, error) {
 	// 새로운 빌더 생성
 	ctx, builder, err := newBuilder(ctx, store, config.SourceImageName)
@@ -804,7 +766,11 @@ func (config *BuildConfig) CreateImage(ctx context.Context, store storage.Store)
 	return builder, imageId, nil
 }
 
-// createDirectories 공통 디렉토리 생성 함수
+// ------------------------------------------------------
+// Helper Functions for Image Building
+// ------------------------------------------------------
+
+// createDirectories creates directories inside the builder.
 func createDirectories(builder *buildah.Builder, dirs []string) error {
 	for _, dir := range dirs {
 		err := builder.Run([]string{"mkdir", "-p", dir}, defaultRunOptions)
@@ -815,7 +781,7 @@ func createDirectories(builder *buildah.Builder, dirs []string) error {
 	return nil
 }
 
-// setFilePermissions 파일 권한 설정 함수
+// setFilePermissions sets file permissions using chmod.
 func setFilePermissions(builder *buildah.Builder, files []string) error {
 	chmodArgs := append([]string{"chmod", "777"}, files...)
 	err := builder.Run(chmodArgs, defaultRunOptions)
@@ -825,7 +791,7 @@ func setFilePermissions(builder *buildah.Builder, files []string) error {
 	return nil
 }
 
-// installDependencies install.sh 실행
+// installDependencies runs the install.sh script.
 func installDependencies(builder *buildah.Builder) error {
 	chmodArgs := []string{"/app/install.sh"}
 	err := builder.Run(chmodArgs, defaultRunOptions)
@@ -835,7 +801,7 @@ func installDependencies(builder *buildah.Builder) error {
 	return nil
 }
 
-// copyScripts 스크립트 복사 함수
+// copyScripts copies scripts to the specified destination directories.
 func copyScripts(builder *buildah.Builder, scripts map[string][]string) error {
 	options := newAddAndCopyOptions()
 	for dest, srcList := range scripts {
@@ -849,7 +815,7 @@ func copyScripts(builder *buildah.Builder, scripts map[string][]string) error {
 	return nil
 }
 
-// saveImage TODO defer 에서 error 리턴하는 것 생각하기
+// saveImage saves the built image to an archive file.
 func saveImage(ctx context.Context, path, imageName, imageTag, imageId string, compress bool) error {
 	if imageTag == "" {
 		imageTag = "latest"
@@ -896,8 +862,12 @@ func saveImage(ctx context.Context, path, imageName, imageTag, imageId string, c
 	return nil
 }
 
+// ------------------------------------------------------
+// Unused Code (주석 처리된 함수들)
+// ------------------------------------------------------
+/*
 // Run 사용하지 않음. 삭제하지 않고 주석 처리함.
-/*func (b *Builder) Run(s string) error {
+func (b *Builder) Run(s string) error {
 
 	logger := GetLoggerWriter()
 	runOptions := buildah.RunOptions{
@@ -928,57 +898,57 @@ func saveImage(ctx context.Context, path, imageName, imageTag, imageId string, c
 		}
 	}
 	return nil
-}*/
+}
 
 // WorkDir 사용하지 않음. 삭제하지 않고 주석 처리함.
-/*func (b *Builder) WorkDir(path string) error {
+func (b *Builder) WorkDir(path string) error {
 	if utils.IsEmptyString(path) {
 		return fmt.Errorf("path is empty")
 	}
 	b.builder.SetWorkDir(path)
 	return nil
-}*/
+}
 
 // Env 사용하지 않음. 삭제하지 않고 주석 처리함.
-/*func (b *Builder) Env(k, v string) error {
+func (b *Builder) Env(k, v string) error {
 	if utils.IsEmptyString(k) || utils.IsEmptyString(v) {
 		return fmt.Errorf("key or valeu is empty")
 	}
 
 	b.builder.SetEnv(k, v)
 	return nil
-}*/
+}
 
 // User 사용하지 않음. 삭제하지 않고 주석 처리함.
-/*func (b *Builder) User(u string) error {
+func (b *Builder) User(u string) error {
 	if utils.IsEmptyString(u) {
 		return fmt.Errorf("user is empty")
 	}
 
 	b.builder.SetUser(u)
 	return nil
-}*/
+}
 
 // Expose 사용하지 않음. 삭제하지 않고 주석 처리함.
-/*func (b *Builder) Expose(port string) error {
+func (b *Builder) Expose(port string) error {
 	if utils.IsEmptyString(port) {
 		return fmt.Errorf("port is empty")
 	}
 	b.builder.SetPort(port)
 	return nil
-}*/
+}
 
 // Cmd 사용하지 않음. 삭제하지 않고 주석 처리함.
-/*func (b *Builder) Cmd(cmd ...string) error {
+func (b *Builder) Cmd(cmd ...string) error {
 	if len(cmd) == 0 {
 		return fmt.Errorf("command is empty")
 	}
 	b.builder.SetCmd(cmd)
 	return nil
-}*/
+}
 
 // CommitImage 사용하지 않음. 삭제하지 않고 주석 처리함.
-/*func (b *Builder) CommitImage(ctx context.Context, preferredManifestType string, sysCtx *imageTypes.SystemContext, repository string) (*string, error) {
+func (b *Builder) CommitImage(ctx context.Context, preferredManifestType string, sysCtx *imageTypes.SystemContext, repository string) (*string, error) {
 
 	imageRef, err := is.Transport.ParseStoreReference(b.store, repository)
 	if err != nil {
@@ -991,10 +961,10 @@ func saveImage(ctx context.Context, path, imageName, imageTag, imageId string, c
 	})
 
 	return &imageId, err
-}*/
+}
 
 // GetLoggerWriter 사용하지 않음. 삭제하지 않고 주석 처리함.
-/*func GetLoggerWriter() io.Writer {
+func GetLoggerWriter() io.Writer {
 	if Verbose || Debug {
 		return os.Stdout
 	} else {
@@ -1006,4 +976,5 @@ type NopLogger struct{}
 
 func (n NopLogger) Write(p []byte) (int, error) {
 	return len(p), nil
-}*/
+}
+*/

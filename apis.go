@@ -2,12 +2,17 @@ package podbridge5
 
 import (
 	"context"
+	"fmt"
+	"github.com/containers/storage"
 	"sync"
 )
 
 // 일단 초안 부터 시작하자.
 
-var once sync.Once
+var (
+	once    sync.Once
+	pbStore storage.Store
+)
 
 // 전체적인 methods
 // Init, InitWithContext 반드시 둘중 하나만 사용해야함.
@@ -15,9 +20,16 @@ var once sync.Once
 func Init() error {
 	var err error
 	once.Do(func() {
-		// 전역 변수에 할당하도록 '='를 사용
+		// podman 연결 초기화
 		_, err = NewConnectionLinux5(context.Background())
 		if err != nil {
+			err = fmt.Errorf("failed to initialize podman connection: %v", err)
+			return
+		}
+		// 내부 전역 변수에 할당한다.
+		pbStore, err = NewStore()
+		if err != nil {
+			err = fmt.Errorf("failed to create store: %v", err)
 			return
 		}
 	})
@@ -28,14 +40,27 @@ func Init() error {
 func InitWithContext(ctx context.Context) (context.Context, error) {
 	var err error
 	once.Do(func() {
-		// 전역 변수에 할당하도록 '='를 사용
 		ctx, err = NewConnectionLinux5(ctx)
 		if err != nil {
+			err = fmt.Errorf("failed to initialize podman connection: %v", err)
 			return
 		}
-		//PbStore, err = NewStore()
+		pbStore, err = NewStore()
+		if err != nil {
+			err = fmt.Errorf("failed to create store: %v", err)
+			return
+		}
 	})
 	return ctx, err
+}
+
+// Shutdown app main 에서 defer 로 처리해야함.
+func Shutdown() error {
+	if pbStore == nil {
+		return fmt.Errorf("pbStore is nil")
+	}
+	// TODO ShutDown 을 shutdown 으로 고쳤는데 생각해보자.
+	return shutdown(pbStore, false)
 }
 
 // 추가적인 수정도 생각해볼 수 있음.

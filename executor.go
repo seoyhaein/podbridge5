@@ -10,39 +10,29 @@ import (
 	"path/filepath"
 )
 
-// GenerateExecutor TODO 통일성을 위해서 defer 리턴 구문 정리
-// path 생성될 executor.sh 의 path, fileName "executor.sh", userScriptPath 컨테이너내에서 executor.sh 가 실행 할 user_script.sh 의 위치
+// GenerateExecutor path 생성될 executor.sh 의 path, fileName "executor.sh", userScriptPath 컨테이너내에서 executor.sh 가 실행 할 user_script.sh 의 위치
 func GenerateExecutor(path, fileName, userScriptPath string) (*os.File, *string, error) {
 	if utils.IsEmptyString(path) || utils.IsEmptyString(fileName) {
 		return nil, nil, fmt.Errorf("path or file name is empty")
 	}
 
-	var (
-		tmpFile      *os.File
-		err          error
-		executorPath string
-		tmpFilePath  string
-	)
-
-	defer func() {
-		// 파일을 닫는 처리
-		if tmpFile != nil {
-			if err = tmpFile.Close(); err != nil {
-				Log.Errorf("Failed to create temporary file: %v", err)
-			}
+	// Ensure the directory exists.
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		if err := os.MkdirAll(path, 0755); err != nil {
+			return nil, nil, fmt.Errorf("failed to create directory: %w", err)
 		}
-	}()
+	}
 
-	executorPath = fmt.Sprintf("%s/%s", path, fileName)
-	tmpFilePath = fmt.Sprintf("%s/%s.tmp", path, fileName) // 임시 파일 경로 설정
+	executorPath := filepath.Join(path, fileName)
+	tmpFilePath := filepath.Join(path, fileName+".tmp") // 임시 파일 경로 설정
 
 	// 임시 파일 생성
-	tmpFile, err = os.Create(tmpFilePath)
+	tmpFile, err := os.Create(tmpFilePath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create temporary file: %w", err)
 	}
 
-	// 임시 파일에 스크립트 내용을 작성
+	// 스크립트 내용을 작성
 	scriptContent := fmt.Sprintf(`#!/usr/bin/env bash
 
 result_log="/app/result.log"
@@ -86,16 +76,25 @@ else
     echo "Task completed successfully" | tee -a "$result_log"
 fi
 
-exit $task_exit_code`, userScriptPath, userScriptPath) // cmd 값을 삽입하여 실행할 명령어를 설정
+exit $task_exit_code`, userScriptPath, userScriptPath)
 
-	_, err = tmpFile.Write([]byte(scriptContent))
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to write script content to temporary file: %w", err)
+	// 임시 파일에 스크립트 내용 작성, err 같은 걸 쓰면 쉐도잉 현상 발생해서 error 혼동을 줄 수 있음. 명확하게 err 이름을 정하자.
+	if _, writeErr := tmpFile.Write([]byte(scriptContent)); writeErr != nil {
+		if closeErr := tmpFile.Close(); closeErr != nil {
+			Log.Errorf("failed to close temporary file after write error: %v", closeErr)
+		}
+		return nil, nil, fmt.Errorf("failed to write script content to temporary file: %w", writeErr)
 	}
 
-	// 파일을 디스크에 동기화
+	// 파일을 동기화한 후 닫음
 	if err := tmpFile.Sync(); err != nil {
+		if closeErr := tmpFile.Close(); closeErr != nil {
+			Log.Errorf("failed to close temporary file after write error: %v", closeErr)
+		}
 		return nil, nil, fmt.Errorf("failed to sync temporary file: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		return nil, nil, fmt.Errorf("failed to close temporary file: %w", err)
 	}
 
 	// 기존 파일이 있는지 확인
@@ -108,7 +107,7 @@ exit $task_exit_code`, userScriptPath, userScriptPath) // cmd 값을 삽입하�
 			return nil, nil, fmt.Errorf("failed to compare files: %w", err)
 		}
 
-		// 파일이 같으면 임시 파일 삭제
+		// 파일 내용이 같으면 임시 파일 삭제 후 경로만 반환
 		if same {
 			if err := os.Remove(tmpFilePath); err != nil {
 				Log.Errorf("Failed to remove temporary file %s: %v", tmpFilePath, err)
@@ -119,18 +118,22 @@ exit $task_exit_code`, userScriptPath, userScriptPath) // cmd 값을 삽입하�
 	}
 
 	// 파일이 다르거나 기존 파일이 없는 경우, 임시 파일을 최종 파일로 교체
-	err = os.Rename(tmpFilePath, executorPath)
-	if err != nil {
+	if err = os.Rename(tmpFilePath, executorPath); err != nil {
 		return nil, nil, fmt.Errorf("failed to rename temporary file to final file: %w", err)
 	}
 
 	// 파일 권한 설정
-	err = os.Chmod(executorPath, 0777)
-	if err != nil {
+	if err = os.Chmod(executorPath, 0777); err != nil {
 		return nil, nil, fmt.Errorf("failed to set file permissions: %w", err)
 	}
 
-	return tmpFile, &executorPath, nil
+	// 최종 파일을 열어서 반환 (열린 파일 포인터)
+	finalFile, err := os.Open(executorPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to open final executor file: %w", err)
+	}
+
+	return finalFile, &executorPath, nil
 }
 
 // compareFiles 두 파일의 내용을 비교하는 함수
@@ -139,10 +142,9 @@ func compareFiles(file1, file2 string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-
 	defer func() {
-		if err = f1.Close(); err != nil {
-			Log.Errorf("Failed to create file1: %v", err)
+		if closeErr := f1.Close(); closeErr != nil {
+			Log.Errorf("Failed to close file %s: %v", file1, closeErr)
 		}
 	}()
 
@@ -150,10 +152,9 @@ func compareFiles(file1, file2 string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-
 	defer func() {
-		if err = f2.Close(); err != nil {
-			Log.Errorf("Failed to create file2: %v", err)
+		if closeErr := f2.Close(); closeErr != nil {
+			Log.Errorf("Failed to close file %s: %v", file2, closeErr)
 		}
 	}()
 
@@ -172,7 +173,7 @@ func compareFiles(file1, file2 string) (bool, error) {
 		return false, nil
 	}
 
-	// 파일 내용을 비교
+	// 1024바이트 단위로 읽어 파일 내용을 비교
 	buf1 := make([]byte, 1024)
 	buf2 := make([]byte, 1024)
 
@@ -200,7 +201,6 @@ func compareFiles(file1, file2 string) (bool, error) {
 }
 
 // ProcessScript use_script.sh 만들어 주는 메서드
-// 기존 파일이 있을 경우, 파일을 삭제하고 새로 생성할지, 비교할지 고민하자. 일단 버그가 있음.
 // TODO ProcessScript(testScript, "./scripts/") 이런식으로 해야하는데 이건 개선하는 방향으로 하자.
 func ProcessScript(scriptContent string, path string) (string, error) {
 	// 디렉토리가 존재하지 않으면 생성
@@ -226,9 +226,10 @@ func ProcessScript(scriptContent string, path string) (string, error) {
 	}
 
 	defer func() {
-		if err := os.Remove(tmpFile.Name()); err != nil { // 문법 검사 실패 시 임시 파일 삭제
+		if err := os.Remove(tmpFile.Name()); err != nil && !os.IsNotExist(err) { // 문법 검사 실패 시 임시 파일 삭제
 			Log.Errorf("Failed to remove temporary file %s: %v", tmpFile.Name(), err)
-			err = fmt.Errorf("failed to remove temporary file %s: %w", tmpFile.Name(), err)
+			// 리소스 해제시 발생하는 err 는 defer 외부 루틴의 err 와 분리하는게 바람직하다. 기억하기 위해서 지우지 않음.
+			// err = fmt.Errorf("failed to remove temporary file %s: %w", tmpFile.Name(), err)
 		}
 	}()
 
@@ -262,16 +263,3 @@ func ProcessScript(scriptContent string, path string) (string, error) {
 	// 마지막 err 의 경우 defer 에서 nil 이 아닐 경우 err 를 반환한다.
 	return shFilePath, err
 }
-
-// ensureShebang  TODO 삭제하지만 주석으로 남겨둔다.
-/*func ensureShebang(scriptContent string) string {
-	// 스크립트에서 #!이 처음 등장하는 위치를 찾음
-	shebangIndex := strings.Index(scriptContent, "#!")
-
-	// #!이 첫 번째 줄이 아닌 경우, 앞에 불필요한 내용 제거
-	if shebangIndex > 0 {
-		// shebang 앞의 공백이나 불필요한 내용을 제거
-		scriptContent = scriptContent[shebangIndex:]
-	}
-	return strings.TrimSpace(scriptContent)
-}*/
