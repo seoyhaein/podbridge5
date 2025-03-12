@@ -820,17 +820,17 @@ func (config *BuildConfig) CreateImage2(ctx context.Context, store storage.Store
 		return nil, "", fmt.Errorf("failed to create new builder: %w", err)
 	}
 
-	// BuildSettings.Directories에 지정된 디렉토리 생성
+	// BuildSettings.Directories 에 지정된 디렉토리 생성
 	if err = createDirectories(builder, config.BuildSettings.Directories); err != nil {
 		return builder, "", fmt.Errorf("failed to create directories: %w", err)
 	}
 
-	// BuildSettings.ScriptMap에 지정된 스크립트 복사
+	// BuildSettings.ScriptMap 에 지정된 스크립트 복사
 	if err = copyScripts(builder, config.BuildSettings.ScriptMap); err != nil {
 		return builder, "", fmt.Errorf("failed to copy scripts: %w", err)
 	}
 
-	// BuildSettings.PermissionFiles에 지정된 파일 권한 설정
+	// BuildSettings.PermissionFiles 에 지정된 파일 권한 설정
 	if err = setFilePermissions(builder, config.BuildSettings.PermissionFiles); err != nil {
 		return builder, "", fmt.Errorf("failed to set file permissions: %w", err)
 	}

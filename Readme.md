@@ -35,6 +35,7 @@
 - ~~CreateDefaultImage~~ CreateImageWithDockerfile 수정해야 함. alpine 으로 했을때는 Dockerfile.alpine.executor 와 동일 해야 함.
 ~~- 이미지를 만들때 CMD ["/bin/sh", "-c", "/app/executor.sh"] 이런 식으로 만들어 주어야 함.~~ 
 - 주요한 테스트가 끝나면 db 에 넣는 것을 생각 해야함.  
+- executor.go 분리하자.
 
 ## container.go
 - 런할때는 좀더 생각해야 함. 떨어지는 이미지나 필요한 이미지를 넣어주는 것을 생각해야 함.  
