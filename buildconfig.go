@@ -89,17 +89,17 @@ func NewConfigFromFile(configPath string) (*BuildConfig, error) {
 	}
 
 	// 필수 항목 검증
-	if cfg.SourceImageName == "" {
+	/*if cfg.SourceImageName == "" {
 		return nil, fmt.Errorf("missing 'sourceImageName' in configuration")
 	}
 	if cfg.ImageSavePath == "" {
 		return nil, fmt.Errorf("missing 'imageSavePath' in configuration")
-	}
+	}*/
 
 	// SourceImageName 뒤에 "_internal"을 붙여 ImageName 설정 (옵션)
-	if cfg.ImageName == "" {
+	/*if cfg.ImageName == "" {
 		cfg.ImageName = cfg.SourceImageName + "_internal"
-	}
+	}*/
 
 	return &cfg, nil
 }
