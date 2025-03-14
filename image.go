@@ -145,18 +145,18 @@ func capabilities() ([]string, error) {
 // ------------------------------------------------------
 
 // NewBuilder creates a new Builder with the specified options, 함수 수정: 각 옵션을 적용할 때 에러를 확인
-func NewBuilder(ctx context.Context, store storage.Store, opts ...BuilderOption) (context.Context, *buildah.Builder, error) {
+func NewBuilder(ctx context.Context, store storage.Store, opts ...BuilderOption) (*buildah.Builder, error) {
 	builderOpts := &buildah.BuilderOptions{}
 	for _, applyOpt := range opts {
 		if err := applyOpt(builderOpts); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 	}
 	builder, err := buildah.NewBuilder(ctx, store, *builderOpts)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	return ctx, builder, nil
+	return builder, nil
 }
 
 // NewStore creates and initializes a new storage.Store object
@@ -321,9 +321,9 @@ func buildImageFromDockerfile(ctx context.Context, dockerfilePath string) (conte
 
 // newBuilder creates a new builder using the NewBuilder function with default options.
 // TODO 좀더 study 필요. 옵션들에 대해서.
-func newBuilder(ctx context.Context, store storage.Store, idname string) (context.Context, *buildah.Builder, error) {
+func newBuilder(ctx context.Context, store storage.Store, idName string) (*buildah.Builder, error) {
 	return NewBuilder(ctx, store,
-		WithFromImage(idname),
+		WithFromImage(idName),
 		WithIsolation(define.IsolationOCI),
 		WithCommonBuildOptions(nil),
 		WithSystemContext(nil),
@@ -367,7 +367,7 @@ func CreateImageWithDockerfile2(ctx context.Context, store storage.Store, config
 	}
 
 	// 새로운 빌더 생성
-	ctx, builder, err := newBuilder(ctx, store, id)
+	builder, err := newBuilder(ctx, store, id)
 	if err != nil {
 		Log.Errorf("Failed to create new builder: %v", err)
 		return nil, "", err
@@ -467,7 +467,7 @@ func CreateImageWithDockerfile(ctx context.Context, store storage.Store, config 
 	}
 
 	// 새로운 빌더 생성
-	ctx, builder, err := newBuilder(ctx, store, id)
+	builder, err := newBuilder(ctx, store, id)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to create new builder: %w", err)
 	}
@@ -543,7 +543,7 @@ func (config *BuildConfig) CreateImageWithDockerfile(ctx context.Context, store 
 	}
 
 	// 새로운 빌더 생성
-	ctx, builder, err := newBuilder(ctx, store, id)
+	builder, err := newBuilder(ctx, store, id)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to create new builder: %w", err)
 	}
@@ -612,7 +612,7 @@ func (config *BuildConfig) CreateImageWithDockerfile(ctx context.Context, store 
 // CreateImage creates an image based on a default OS.
 func CreateImage(ctx context.Context, store storage.Store, config BuildConfig) (*buildah.Builder, string, error) {
 
-	ctx, builder, err := newBuilder(ctx, store, config.SourceImageName)
+	builder, err := newBuilder(ctx, store, config.SourceImageName)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to create new builder: %w", err)
 	}
@@ -685,7 +685,7 @@ func CreateImage(ctx context.Context, store storage.Store, config BuildConfig) (
 // (BuildConfig) CreateImage creates an image based on BuildConfig.
 func (config *BuildConfig) CreateImage(ctx context.Context, store storage.Store) (*buildah.Builder, string, error) {
 	// 새로운 빌더 생성
-	ctx, builder, err := newBuilder(ctx, store, config.SourceImageName)
+	builder, err := newBuilder(ctx, store, config.SourceImageName)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to create new builder: %w", err)
 	}
@@ -755,7 +755,7 @@ func (config *BuildConfig) CreateImage(ctx context.Context, store storage.Store)
 
 func (config *BuildConfig) CreateImage1(ctx context.Context, store storage.Store) (*buildah.Builder, string, error) {
 	// 새로운 빌더 생성 (SourceImageName을 기반으로)
-	ctx, builder, err := newBuilder(ctx, store, config.SourceImageName)
+	builder, err := newBuilder(ctx, store, config.SourceImageName)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to create new builder: %w", err)
 	}
@@ -815,7 +815,7 @@ func (config *BuildConfig) CreateImage1(ctx context.Context, store storage.Store
 // CreateImage2 메서드는 BuildSettings에 설정된 값들을 반영하여 이미지를 생성합니다.
 func (config *BuildConfig) CreateImage2(ctx context.Context, store storage.Store) (*buildah.Builder, string, error) {
 	// 새로운 빌더 생성 (SourceImageName을 베이스 이미지로 사용)
-	ctx, builder, err := newBuilder(ctx, store, config.SourceImageName)
+	builder, err := newBuilder(ctx, store, config.SourceImageName)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to create new builder: %w", err)
 	}
@@ -939,7 +939,12 @@ func saveImage(ctx context.Context, path, imageName, imageTag, imageId string, c
 	if err != nil {
 		return fmt.Errorf("failed to create output file %s: %w", archivePath, err)
 	}
-	defer outputFile.Close()
+
+	defer func() {
+		if cErr := outputFile.Close(); cErr != nil {
+			Log.Warnf("Failed to close output file: %v", cErr)
+		}
+	}()
 
 	var writer io.Writer = outputFile
 
@@ -947,8 +952,8 @@ func saveImage(ctx context.Context, path, imageName, imageTag, imageId string, c
 		// gzip.Writer 를 사용하여 데이터를 압축
 		gzipWriter := gzip.NewWriter(outputFile)
 		defer func() {
-			if err := gzipWriter.Close(); err != nil {
-				Log.Errorf("Failed to close gzip writer: %v", err)
+			if zCerr := gzipWriter.Close(); zCerr != nil {
+				Log.Errorf("Failed to close gzip writer: %v", zCerr)
 			}
 		}()
 		writer = gzipWriter

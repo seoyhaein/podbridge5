@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	pbr "github.com/seoyhaein/podbridge5"
 	"log"
@@ -62,7 +61,7 @@ func main() {
 		}
 	}()
 	// 일단 에러 발생하니까. 이렇게 만들어줌.
-	ctx := context.Background()
+	// ctx := context.Background()
 
 	// 여기서 부터는 컨테이너 나 이제 이미지 파트이다.
 	// 컨테이너나 이미지는 여러개 생성 및 삭제가 가능하다라는 사실을 잊으면 안된다.
@@ -136,12 +135,12 @@ exit 0`
 	config := pbr.NewConfig("docker.io/library/alpine:latest")
 	//builder, imageId, err := config.CreateImageWithDockerfile(ctx, store)
 	// TODO 수정해줘야 함. 또는 wrapper method 를 만들어줘야 함.
-	builder, imageId, err := config.CreateImage3(ctx)
+	builder, imageId, err := config.CreateImage3(pbr.PbCtx)
 	if err != nil {
 		log.Fatalf("Failed to create image: %v\n", err)
 	}
 
-	containerId, err := pbr.RunContainer(ctx, imageId, "testContainer", true)
+	containerId, err := pbr.RunContainer(pbr.PbCtx, imageId, "testContainer", true)
 	if err != nil {
 		log.Fatalf("Failed to create container: %v\n", err)
 	}
@@ -160,7 +159,7 @@ exit 0`
 	// 컨테이너 상태 모니터링 루프
 	for {
 		fmt.Println("start")
-		containerData, err := pbr.InspectContainer(ctx, containerId)
+		containerData, err := pbr.InspectContainer(pbr.PbCtx, containerId)
 		if err != nil {
 			log.Printf("Error getting container info: %v\n", err)
 			break

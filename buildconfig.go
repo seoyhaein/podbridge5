@@ -1,7 +1,6 @@
 package podbridge5
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"github.com/containers/buildah"
@@ -144,10 +143,14 @@ func (config *BuildConfig) SetCMD(cmd []string) {
 	config.BuildSettings.CMD = cmd
 }
 
-// CreateImage3 메서드는 BuildSettings 에 설정된 값들을 반영하여 이미지를 생성, TODO pbStore nil 인지 확인 필요하지 않을까??
-func (config *BuildConfig) CreateImage3(ctx context.Context) (*buildah.Builder, string, error) {
+// CreateImage3 메서드는 BuildSettings 에 설정된 값들을 반영하여 이미지를 생성,
+func (config *BuildConfig) CreateImage3() (*buildah.Builder, string, error) {
+	if pbCtx == nil {
+		return nil, "", fmt.Errorf("pbCtx is nil")
+	}
+
 	// 새로운 빌더 생성 (SourceImageName 베이스 이미지로 사용)
-	ctx, builder, err := newBuilder(ctx, pbStore, config.SourceImageName)
+	builder, err := newBuilder(pbCtx, pbStore, config.SourceImageName)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to create new builder: %w", err)
 	}
@@ -183,7 +186,7 @@ func (config *BuildConfig) CreateImage3(ctx context.Context) (*buildah.Builder, 
 	}
 
 	// 이미지를 커밋
-	imageId, _, _, err := builder.Commit(ctx, imageRef, buildah.CommitOptions{
+	imageId, _, _, err := builder.Commit(pbCtx, imageRef, buildah.CommitOptions{
 		PreferredManifestType: buildah.Dockerv2ImageManifest,
 		SystemContext:         &imageTypes.SystemContext{},
 	})
@@ -192,7 +195,7 @@ func (config *BuildConfig) CreateImage3(ctx context.Context) (*buildah.Builder, 
 	}
 
 	// 이미지를 저장
-	if err = saveImage(ctx, config.ImageSavePath, config.ImageName, "", imageId, false); err != nil {
+	if err = saveImage(pbCtx, config.ImageSavePath, config.ImageName, "", imageId, false); err != nil {
 		return builder, imageId, fmt.Errorf("failed to save image: %w", err)
 	}
 

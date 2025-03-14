@@ -12,6 +12,7 @@ import (
 var (
 	once    sync.Once
 	pbStore storage.Store
+	pbCtx   context.Context
 )
 
 // 전체적인 methods
@@ -21,7 +22,7 @@ func Init() error {
 	var err error
 	once.Do(func() {
 		// podman 연결 초기화
-		_, err = NewConnectionLinux5(context.Background())
+		pbCtx, err = NewConnectionLinux5(context.Background())
 		if err != nil {
 			err = fmt.Errorf("failed to initialize podman connection: %v", err)
 			return
