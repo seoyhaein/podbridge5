@@ -9,6 +9,7 @@ import (
 	imageTypes "github.com/containers/image/v5/types"
 	"github.com/seoyhaein/utils"
 	"os"
+	"strings"
 )
 
 // ImageBuildSettings holds additional settings for building an image.
@@ -37,10 +38,11 @@ type BuildConfig struct {
 // NewConfig sourceImageName 만 동적으로 받고, 나머지 BuildConfig 필드를 기본 값으로 고정함. 내부에서 사용하는 이미지 생성에 필요한 옵션임.
 // TODO DockerfilePath 일단 살펴보자.
 func NewConfig(sourceImageName string) *BuildConfig {
+	internalImgName := internalizeImageName(sourceImageName)
 	return &BuildConfig{
 		SourceImageName: sourceImageName,
 		// sourceImageName 뒤에 "_internal"을 붙여 내부 이미지 이름으로 사용
-		ImageName:        sourceImageName + "_internal",
+		ImageName:        internalImgName,
 		ImageSavePath:    "/opt/images",
 		ExecutorShell:    "./executor.sh",
 		HealthcheckShell: "./healthcheck.sh",
@@ -110,6 +112,11 @@ func (config *BuildConfig) SetSourceImageName(sourceImageName string) {
 
 func (config *BuildConfig) SetImageName(imageName string) {
 	config.ImageName = imageName
+}
+
+func (config *BuildConfig) SetSourceImageNameAndImageName(sourceImageName string) {
+	config.SourceImageName = sourceImageName
+	config.ImageName = internalizeImageName(sourceImageName)
 }
 
 // SetDirectories 컨테이너 내부에서 생성할 디렉토리 목록을 설정합니다.
@@ -190,4 +197,22 @@ func (config *BuildConfig) CreateImage3(ctx context.Context) (*buildah.Builder, 
 	}
 
 	return builder, imageId, nil
+}
+
+// internalizeImageName 은 입력 이미지 이름에서 태그 앞에 "-internal"을 삽입하여 내부 전용 이미지 이름을 생성
+// 예: "docker.io/library/alpine:latest" -> "docker.io/library/alpine-internal:latest"
+func internalizeImageName(imageName string) string {
+	// 마지막 콜론의 인덱스를 찾습니다.
+	colonIndex := strings.LastIndex(imageName, ":")
+	if colonIndex == -1 {
+		// 태그가 없는 경우, 그냥 "-internal"을 추가합니다.
+		return imageName + "-internal"
+	}
+
+	// 콜론 앞까지의 이미지 이름과 태그를 분리
+	baseName := imageName[:colonIndex]
+	tag := imageName[colonIndex:] // 콜론 포함
+
+	// 내부 전용 이미지 이름 생성
+	return baseName + "-internal" + tag
 }
