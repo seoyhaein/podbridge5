@@ -1,0 +1,25 @@
+{
+  "sourceImageName": "myapp",
+  "imageName": "",
+  "imageSavePath": "/opt/images",
+  "executorShell": "./executor.sh",
+  "dockerfilePath": "./Dockerfile",
+  "healthcheckShell": "./healthcheck.sh",
+  "installShell": "./install.sh",
+  "userScriptShell": "./scripts/user_script.sh",
+  "buildSettings": {
+    "directories": ["/app", "/app/scripts"],
+    "scriptMap": {
+      "/app": ["./executor.sh", "./healthcheck.sh", "./install.sh"],
+      "/app/scripts": ["./scripts/user_script.sh"]
+    },
+    "permissionFiles": [
+      "/app/executor.sh",
+      "/app/install.sh",
+      "/app/healthcheck.sh",
+      "/app/scripts/user_script.sh"
+    ],
+    "workDir": "/app",
+    "cmd": ["/bin/sh", "-c", "/app/executor.sh"]
+  }
+}

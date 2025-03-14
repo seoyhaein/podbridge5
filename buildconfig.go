@@ -2,69 +2,37 @@ package podbridge5
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/containers/buildah"
 	is "github.com/containers/image/v5/storage"
 	imageTypes "github.com/containers/image/v5/types"
+	"github.com/seoyhaein/utils"
+	"os"
 )
 
 // ImageBuildSettings holds additional settings for building an image.
 type ImageBuildSettings struct {
-	Directories     []string            // 컨테이너 내부에서 생성할 디렉토리 목록
-	ScriptMap       map[string][]string // 키: 대상 디렉토리, 값: 복사할 스크립트 파일 목록
-	PermissionFiles []string            // 권한 설정을 적용할 파일 경로 목록
-	WorkDir         string              // 최종 이미지의 작업 디렉토리
-	CMD             []string            // 컨테이너 시작 시 실행할 명령어
+	Directories     []string            `json:"directories"`     // 컨테이너 내부에서 생성할 디렉토리 목록
+	ScriptMap       map[string][]string `json:"scriptMap"`       // 대상 디렉토리별 복사할 스크립트 파일 목록
+	PermissionFiles []string            `json:"permissionFiles"` // 파일 권한 설정을 적용할 파일 경로 목록 (최종 경로 기준)
+	WorkDir         string              `json:"workDir"`         // 컨테이너 작업 디렉토리
+	CMD             []string            `json:"cmd"`             // 컨테이너 시작 시 실행할 명령어
 }
 
 // BuildConfig holds basic configuration for building an image,
 // plus additional build settings.
 type BuildConfig struct {
-	SourceImageName  string // 기본 베이스 이미지 (예: "docker.io/library/alpine:latest")
-	ImageName        string // 최종 이미지 이름 (예: "tester")
-	ImageSavePath    string // 이미지를 저장할 경로 (예: "/opt/images")
-	ExecutorShell    string // executor 스크립트 경로 (예: "./executor.sh")
-	DockerfilePath   string // Dockerfile 경로 (예: "./Dockerfile")
-	HealthcheckShell string // healthcheck 스크립트 경로 (예: "./healthcheck.sh")
-	InstallShell     string // install 스크립트 경로 (예: "./install.sh")
-	UserScriptShell  string // user script 스크립트 경로 (예: "./scripts/user_script.sh")
-	BuildSettings    ImageBuildSettings
+	SourceImageName  string             `json:"sourceImageName"`  // 기본 베이스 이미지 (예: "docker.io/library/alpine:latest")
+	ImageName        string             `json:"imageName"`        // 최종 이미지 이름 (예: "tester")
+	ImageSavePath    string             `json:"imageSavePath"`    // 이미지를 저장할 경로 (예: "/opt/images")
+	ExecutorShell    string             `json:"executorShell"`    // executor 스크립트 경로 (예: "./executor.sh")
+	DockerfilePath   string             `json:"dockerfilePath"`   // Dockerfile 경로 (예: "./Dockerfile")
+	HealthcheckShell string             `json:"healthcheckShell"` // healthcheck 스크립트 경로 (예: "./healthcheck.sh")
+	InstallShell     string             `json:"installShell"`     // install 스크립트 경로 (예: "./install.sh")
+	UserScriptShell  string             `json:"userScriptShell"`  // user script 스크립트 경로 (예: "./scripts/user_script.sh")
+	BuildSettings    ImageBuildSettings `json:"buildSettings"`    // 이미지 빌드에 사용되는 추가 설정들
 }
-
-/*// NewImageBuildSettings ImageBuildSettings 생성하는 팩토리 메서드. TODO 여기서는 값을 리턴했다. 생각해보자.
-func NewImageBuildSettings(
-	directories []string,
-	scriptMap map[string][]string,
-	permissionFiles []string,
-	workDir string,
-	cmd []string,
-) ImageBuildSettings {
-	return ImageBuildSettings{
-		Directories:     directories,
-		ScriptMap:       scriptMap,
-		PermissionFiles: permissionFiles,
-		WorkDir:         workDir,
-		CMD:             cmd,
-	}
-}
-
-// NewBuildConfig BuildConfig 생성하는 팩토리 메서드
-// 필요한 모든 필드를 인자로 받아서 BuildConfig 인스턴스를 반환
-// sourceImageName 와 imageName 는 별도로 설정받아야 함.
-func NewBuildConfig(
-	imageSavePath,
-	executorShell, healthcheckShell, installShell, userScriptShell string,
-	settings ImageBuildSettings,
-) *BuildConfig {
-	return &BuildConfig{
-		ImageSavePath:    imageSavePath,
-		ExecutorShell:    executorShell,
-		HealthcheckShell: healthcheckShell,
-		InstallShell:     installShell,
-		UserScriptShell:  userScriptShell,
-		BuildSettings:    settings,
-	}
-}*/
 
 // NewConfig sourceImageName 만 동적으로 받고, 나머지 BuildConfig 필드를 기본 값으로 고정함. 내부에서 사용하는 이미지 생성에 필요한 옵션임.
 // TODO DockerfilePath 일단 살펴보자.
@@ -95,6 +63,43 @@ func NewConfig(sourceImageName string) *BuildConfig {
 			CMD:     []string{"/bin/sh", "-c", "/app/executor.sh"}, // 컨테이너 시작 시 실행할 명령어
 		},
 	}
+}
+
+func NewConfigFromFile(configPath string) (*BuildConfig, error) {
+	configPath, err := utils.CheckPath(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check path: %w", err)
+	}
+	file, err := os.Open(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open file: %w", err)
+	}
+	defer func() {
+		if cErr := file.Close(); cErr != nil && err == nil {
+			Log.Warnf("failed to close file: %v", cErr)
+		}
+	}()
+
+	decoder := json.NewDecoder(file)
+	var cfg BuildConfig
+	if err := decoder.Decode(&cfg); err != nil {
+		return nil, fmt.Errorf("failed to decode configuration: %w", err)
+	}
+
+	// 필수 항목 검증
+	if cfg.SourceImageName == "" {
+		return nil, fmt.Errorf("missing 'sourceImageName' in configuration")
+	}
+	if cfg.ImageSavePath == "" {
+		return nil, fmt.Errorf("missing 'imageSavePath' in configuration")
+	}
+
+	// SourceImageName 뒤에 "_internal"을 붙여 ImageName 설정 (옵션)
+	if cfg.ImageName == "" {
+		cfg.ImageName = cfg.SourceImageName + "_internal"
+	}
+
+	return &cfg, nil
 }
 
 // 각 설정값을 동적으로 설정할 수 있는 Setter 메서드들
