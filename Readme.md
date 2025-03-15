@@ -1,4 +1,5 @@
 ## TODO
+- directory.md 관련해서 소스 수정 해야함 (중요.)  
 - container.go 테스트 파일 작성  
 ~~- container 생성까지 작성. 테스트 파일 작성 필요.~~ (성공) 
 - policy.json 과 REGISTRIES.CONF 디폴트로 잡았는데 개발을 위해서 이거 세부적으로 잡아주어야 함. 

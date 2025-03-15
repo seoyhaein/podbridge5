@@ -115,7 +115,11 @@ func (config *BuildConfig) SetImageName(imageName string) {
 
 func (config *BuildConfig) SetSourceImageNameAndImageName(sourceImageName string) {
 	config.SourceImageName = sourceImageName
-	config.ImageName = internalizeImageName(sourceImageName)
+	Log.Printf("sourceImageName: %s", sourceImageName)
+	imgName := internalizeImageName(sourceImageName)
+	Log.Printf("ImageName: %s", imgName)
+	config.ImageName = imgName
+	//config.ImageName = internalizeImageName(sourceImageName)
 }
 
 // SetDirectories 컨테이너 내부에서 생성할 디렉토리 목록을 설정합니다.
@@ -195,7 +199,7 @@ func (config *BuildConfig) CreateImage3() (*buildah.Builder, string, error) {
 	}
 
 	// 이미지를 저장
-	if err = saveImage(pbCtx, config.ImageSavePath, config.ImageName, "", imageId, false); err != nil {
+	if err = saveImage(pbCtx, config.ImageSavePath, config.ImageName, imageId, false); err != nil {
 		return builder, imageId, fmt.Errorf("failed to save image: %w", err)
 	}
 

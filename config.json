@@ -1,7 +1,7 @@
 {
   "sourceImageName": "",
   "imageName": "",
-  "imageSavePath": "/opt/images",
+  "imageSavePath": "./",
   "executorShell": "./executor.sh",
   "dockerfilePath": "./Dockerfile",
   "healthcheckShell": "./healthcheck.sh",
