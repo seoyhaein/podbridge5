@@ -6,6 +6,7 @@ import (
 	pbr "github.com/seoyhaein/podbridge5"
 	"log"
 	"os"
+	"time"
 )
 
 // for testing
@@ -132,7 +133,7 @@ exit 0`
 	config.SetSourceImageNameAndImageName(imageName)
 
 	// CreateImage3 는 임시 메서드임.
-	buildahBuilder, imageId, err := config.CreateImage3()
+	buildahBuilder, imageId, err := config.CreateImage()
 	if err != nil {
 		log.Printf("Failed to create image: %v\n", err)
 		os.Exit(1)
@@ -145,5 +146,101 @@ exit 0`
 	}(buildahBuilder)
 
 	fmt.Printf("Building image: %s\n", imageId)
+	// TODO 수정 필요.
+	containerId, err := pbr.RunContainer(pbr.PbCtx, imageId, "testContainer", true)
+	if err != nil {
+		log.Fatalf("Failed to create container: %v\n", err)
+	}
+
+	defer builder.Delete()
+
+	fmt.Println(containerId)
+
+	// 로그 파일 생성
+	logFile, err := os.Create("container_status.log")
+	if err != nil {
+		log.Fatalf("Failed to create log file: %v\n", err)
+	}
+	defer logFile.Close()
+
+	// 컨테이너 상태 모니터링 루프
+	for {
+		fmt.Println("start")
+		containerData, err := pbr.InspectContainer(pbr.PbCtx, containerId)
+		if err != nil {
+			log.Printf("Error getting container info: %v\n", err)
+			break
+		}
+
+		// 컨테이너 상태 로그 기록
+		status := containerData.State.Status
+		logLine := fmt.Sprintf("Time: %s, Status: %s\n", time.Now().Format(time.RFC3339), status)
+		fmt.Println(logLine)
+		logFile.WriteString(logLine)
+		// HealthCheckResults 값을 로그에 출력
+		if status == "exited" || status == "stopped" {
+			logFile.WriteString("---Container has exited or stopped---")
+			if containerData.State.Health != nil {
+				health := containerData.State.Health
+				healthLine := fmt.Sprintf("Health Status: %s, FailingStreak: %d\n", health.Status, health.FailingStreak)
+				fmt.Println(healthLine)
+				logFile.WriteString(healthLine)
+
+				// HealthCheckLog 출력
+				for _, logEntry := range health.Log {
+					/*healthLine = fmt.Sprintf("Health Status: %s, FailingStreak: %d\n", health.Status, health.FailingStreak)
+					fmt.Println(healthLine)
+					logFile.WriteString(healthLine)*/
+
+					logEntryLine := fmt.Sprintf("Log - Start: %s, End: %s, ExitCode: %d, Output: %s\n",
+						logEntry.Start,
+						logEntry.End,
+						logEntry.ExitCode,
+						logEntry.Output)
+					fmt.Println(logEntryLine)
+					logFile.WriteString(logEntryLine)
+				}
+
+			}
+			break
+		} else {
+			logFile.WriteString("---Container is running or sleeping---")
+			if containerData.State.Health != nil {
+				health := containerData.State.Health
+				healthLine := fmt.Sprintf("Health Status: %s, FailingStreak: %d\n", health.Status, health.FailingStreak)
+				fmt.Println(healthLine)
+				logFile.WriteString(healthLine)
+
+				// HealthCheckLog 출력
+				for _, logEntry := range health.Log {
+					/*healthLine = fmt.Sprintf("Health Status: %s, FailingStreak: %d\n", health.Status, health.FailingStreak)
+					fmt.Println(healthLine)
+					logFile.WriteString(healthLine)*/
+
+					logEntryLine := fmt.Sprintf("Log - Start: %s, End: %s, ExitCode: %d, Output: %s\n",
+						logEntry.Start,
+						logEntry.End,
+						logEntry.ExitCode,
+						logEntry.Output)
+					fmt.Println(logEntryLine)
+					logFile.WriteString(logEntryLine)
+				}
+			}
+
+			// 컨테이너가 종료되었는지 확인
+			/*if status == "exited" || status == "stopped" {
+				log.Println("Container has exited.")
+
+				status := containerData.State.Status
+				logLine := fmt.Sprintf("Time: %s, Status: %s\n", time.Now().Format(time.RFC3339), status)
+				fmt.Println(logLine)
+				logFile.WriteString(logLine)
+				break
+			}*/
+
+			// 일정 시간 대기 후 재확인
+			time.Sleep(1 * time.Second)
+		}
+	}
 
 }

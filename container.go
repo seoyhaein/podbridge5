@@ -16,6 +16,7 @@ import (
 
 // TODO 에러 처리 되는 부분에 Log 안남긴것 남겨두자.
 // TODO 향후 로그 남길때, 어디서 어떤 문제인지 다른 사람이 쉽게 파악할 수 있도록 카테고리화 해서 문서화 해놓자.
+// TODO panic 지우자. error 로 처리하자. image.go 참고.
 
 type ContainerStatus int
 
@@ -167,7 +168,7 @@ func InspectContainer(ctx context.Context, containerId string) (*define.InspectC
 	return containerData, err
 }
 
-// HealthCheckContainer TODO 추후 테스트 필요.
+// HealthCheckContainer TODO 추후 테스트 필요. 확인 필요.
 func HealthCheckContainer(ctx context.Context, containerId string) (status *string, exitCode *int, err error) {
 	// 컨테이너 데이터 조회
 	containerData, err := InspectContainer(ctx, containerId)
