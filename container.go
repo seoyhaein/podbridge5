@@ -14,10 +14,6 @@ import (
 	"time"
 )
 
-// TODO 에러 처리 되는 부분에 Log 안남긴것 남겨두자.
-// TODO 향후 로그 남길때, 어디서 어떤 문제인지 다른 사람이 쉽게 파악할 수 있도록 카테고리화 해서 문서화 해놓자.
-// TODO panic 지우자. error 로 처리하자. image.go 참고.
-
 type ContainerStatus int
 
 const (
@@ -33,6 +29,8 @@ const (
 	None                             // 9
 )
 
+type ContainerOptions func(spec *specgen.SpecGenerator) error
+
 // CreateContainerResult 컨테이너 생성 정보를 담는 구조체
 type (
 	CreateContainerResult struct {
@@ -44,62 +42,77 @@ type (
 )
 
 // NewSpec creates a new SpecGenerator.
-func NewSpec(opts ...func(spec *specgen.SpecGenerator)) *specgen.SpecGenerator {
+func NewSpec(opts ...ContainerOptions) (*specgen.SpecGenerator, error) {
 	spec := &specgen.SpecGenerator{}
 	for _, opt := range opts {
-		opt(spec)
+		if err := opt(spec); err != nil {
+			return nil, err
+		}
 	}
-	return spec
+	return spec, nil
 }
 
-func WithImageName(imgName string) func(spec *specgen.SpecGenerator) {
-	return func(spec *specgen.SpecGenerator) {
+func WithImageName(imgName string) ContainerOptions {
+	return func(spec *specgen.SpecGenerator) error {
 		spec.Image = imgName
+		return nil
 	}
 }
 
-func WithName(name string) func(spec *specgen.SpecGenerator) {
-	return func(spec *specgen.SpecGenerator) {
+func WithName(name string) ContainerOptions {
+	return func(spec *specgen.SpecGenerator) error {
 		spec.Name = name
+		return nil
 	}
 }
 
-func WithTerminal(terminal bool) func(spec *specgen.SpecGenerator) {
-	return func(spec *specgen.SpecGenerator) {
+func WithTerminal(terminal bool) ContainerOptions {
+	return func(spec *specgen.SpecGenerator) error {
 		spec.Terminal = &terminal
+		return nil
 	}
 }
 
-// WithHealthChecker 테스트 해봐야 함.
-func WithHealthChecker(inCmd, interval string, retries uint, timeout, startPeriod string) func(spec *specgen.SpecGenerator) {
-	return func(spec *specgen.SpecGenerator) {
+// WithHealthChecker healthcheck 설정에 문제가 발생하면 에러를 반환
+func WithHealthChecker(inCmd, interval string, retries uint, timeout, startPeriod string) ContainerOptions {
+	return func(spec *specgen.SpecGenerator) error {
 		healthConfig, err := setHealthChecker(inCmd, interval, retries, timeout, startPeriod)
 		if err != nil {
-			//TODO important: healthcheck 설정이 실패하면 결국 컨테이너의 상태를 알수 없음으로 중지 시켜야 한다.
+			// TODO: healthcheck 설정이 실패하면 컨테이너 상태를 알 수 없으므로, 적절한 에러 처리 후 중단.
 			Log.Errorf("Failed to set healthConfig: %v", err)
-			panic(err) //TODO 또는 적절한 에러 처리 로직을 추가
+			return err
 		}
 		spec.HealthConfig = healthConfig
+		return nil
 	}
 }
 
 // RunContainer TODO: WithHealthChecker("CMD-SHELL /app/healthcheck.sh", "2s", 3, "30s", "1s") 이게 들어가 있기때문에, 또한 파마리터 내용에 대해서도 생각해보자
-func RunContainer(ctx context.Context, internalImageName, containerName string, tty bool) (string, error) {
+func RunContainer(internalImageName, containerName string, tty bool) (string, error) {
+	// pbCtx 는 전역 context 임.
+	if pbCtx == nil {
+		return "", errors.New("pbCtx is nil")
+	}
+
 	// TODO: WithHealthChecker 이건 여기서 고정하는 것에 대해서 생각해보자
-	spec := NewSpec(
+	spec, err := NewSpec(
 		WithImageName(internalImageName),
 		WithName(containerName),
 		WithTerminal(tty),
 		WithHealthChecker("CMD-SHELL bash /app/healthcheck.sh", "1s", 1, "30s", "0s"),
 	)
+	if err != nil {
+		Log.Errorf("failed to create spec: %v", err)
+		return "", fmt.Errorf("failed to create spec: %w", err)
+	}
 
-	ccr, err := CreateContainer(ctx, spec)
+	ccr, err := CreateContainer(pbCtx, spec)
 	if err != nil {
 		Log.Errorf("failed to create container: %v", err)
 		return "", fmt.Errorf("failed to create container: %w", err)
 	}
 
-	if err := containers.Start(ctx, ccr.ID, &containers.StartOptions{}); err != nil {
+	if err := containers.Start(pbCtx, ccr.ID, &containers.StartOptions{}); err != nil {
 		Log.Errorf("failed to start container: %v", err)
 		return "", fmt.Errorf("failed to start container: %w", err)
 	}
@@ -160,18 +173,23 @@ func CreateContainer(ctx context.Context, conSpec *specgen.SpecGenerator) (*Crea
 	}, nil
 }
 
-func InspectContainer(ctx context.Context, containerId string) (*define.InspectContainerData, error) {
+func InspectContainer(containerId string) (*define.InspectContainerData, error) {
+	// pbCtx 는 전역 context 임.
+	if pbCtx == nil {
+		return nil, errors.New("pbCtx is nil")
+	}
+
 	var containerInspectOptions containers.InspectOptions
 	containerInspectOptions.Size = utils.PFalse
-	containerData, err := containers.Inspect(ctx, containerId, &containerInspectOptions)
+	containerData, err := containers.Inspect(pbCtx, containerId, &containerInspectOptions)
 
 	return containerData, err
 }
 
 // HealthCheckContainer TODO 추후 테스트 필요. 확인 필요.
-func HealthCheckContainer(ctx context.Context, containerId string) (status *string, exitCode *int, err error) {
+func HealthCheckContainer(containerId string) (status *string, exitCode *int, err error) {
 	// 컨테이너 데이터 조회
-	containerData, err := InspectContainer(ctx, containerId)
+	containerData, err := InspectContainer(containerId)
 	if err != nil {
 		// 오류 발생 시 상태와 종료 코드를 nil 로 반환
 		return nil, nil, err

@@ -76,7 +76,6 @@ func main() {
 	//defer pbr.ShutDown(store, false)
 	//defer store.Shutdown(false)
 
-	// TODO 따로 깔끔하게 정리할 필요가 있음.
 	testScript := `#!/usr/bin/env bash
 
 # 10초 정도 걸리는 계산 작업 수행
@@ -146,27 +145,26 @@ exit 0`
 	}(buildahBuilder)
 
 	fmt.Printf("Building image: %s\n", imageId)
-	// TODO 수정 필요.
-	containerId, err := pbr.RunContainer(pbr.PbCtx, imageId, "testContainer", true)
+	containerId, err := pbr.RunContainer(imageId, "testContainer", true)
 	if err != nil {
-		log.Fatalf("Failed to create container: %v\n", err)
+		log.Printf("Failed to create container: %v\n", err)
+		os.Exit(1)
 	}
-
-	defer builder.Delete()
 
 	fmt.Println(containerId)
 
 	// 로그 파일 생성
 	logFile, err := os.Create("container_status.log")
 	if err != nil {
-		log.Fatalf("Failed to create log file: %v\n", err)
+		log.Printf("Failed to create log file: %v\n", err)
+		os.Exit(1)
 	}
 	defer logFile.Close()
 
 	// 컨테이너 상태 모니터링 루프
 	for {
 		fmt.Println("start")
-		containerData, err := pbr.InspectContainer(pbr.PbCtx, containerId)
+		containerData, err := pbr.InspectContainer(containerId)
 		if err != nil {
 			log.Printf("Error getting container info: %v\n", err)
 			break
