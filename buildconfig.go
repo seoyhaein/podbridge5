@@ -12,6 +12,8 @@ import (
 	"os"
 )
 
+// TODO 조정해줘야 함.
+
 // ImageBuildSettings holds additional settings for building an image.
 type ImageBuildSettings struct {
 	Directories     []string            `json:"directories"`     // 컨테이너 내부에서 생성할 디렉토리 목록

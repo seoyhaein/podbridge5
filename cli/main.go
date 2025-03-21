@@ -131,7 +131,6 @@ exit 0`
 	imageName := "docker.io/library/alpine:latest"
 	config.SetSourceImageNameAndImageName(imageName)
 
-	// CreateImage3 는 임시 메서드임.
 	buildahBuilder, imageId, err := config.CreateImage()
 	if err != nil {
 		log.Printf("Failed to create image: %v\n", err)
