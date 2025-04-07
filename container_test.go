@@ -9,37 +9,32 @@ import (
 )
 
 func TestCreateContainer(t *testing.T) {
-
 	ctx, err := NewConnectionLinux5(context.Background())
-
 	if err != nil {
-		t.Errorf("NewConnectionLinux5() failed")
+		t.Fatalf("NewConnectionLinux5() failed: %v", err)
 	}
-	// TODO WithHealthChecker 는 healthcheck.sh 가 있는 경우만 가능.
-	// TODO: 여기서 들어가는 이미지는 데이터가 들어가는 내부적인 이미지이다. 즉,사용자에게는 공개되지 않는 이미지이다.
-	// WithHealthChecker("CMD-SHELL /app/healthcheck.sh", "2s", 3, "30s", "1s"), 이거 넣어주면 unhealthy 됨. healthcheck.sh 가 없기 때문.
-	/*spec := NewSpec(
-		WithImageName("docker.io/library/busybox:latest"),
-		WithName("running-container"),
-		WithTerminal(true),
-		WithHealthChecker("CMD-SHELL /app/healthcheck.sh", "2s", 3, "30s", "1s"),
-	)*/
 
-	spec := NewSpec(
+	// WithHealthChecker 는 주석 처리되어 있으므로, 기본 옵션만 사용
+	spec, err := NewSpec(
 		WithImageName("docker.io/library/busybox:latest"),
 		WithName("testerhaha"),
 		WithTerminal(true),
 	)
-
-	if spec == nil {
-		t.Errorf("fail to create ContainerSpec")
-	}
-
-	_, err = CreateContainer(ctx, spec)
 	if err != nil {
-		t.Errorf("fail to create container")
+		t.Fatalf("failed to create ContainerSpec: %v", err)
+	}
+	if spec == nil {
+		t.Fatal("spec is nil")
 	}
 
+	// CreateContainer 실행
+	container, err := CreateContainer(ctx, spec)
+	if err != nil {
+		t.Fatalf("fail to create container: %v", err)
+	}
+
+	// 추가 검증이 필요한 경우 container 에 대한 추가 검사를 여기에 추가할 수 있음
+	t.Logf("Container created successfully: %+v", container)
 }
 
 func TestNewSetHealthChecker(t *testing.T) {

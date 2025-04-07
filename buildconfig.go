@@ -365,7 +365,7 @@ func (config *BuildConfig) CreateImage() (*buildah.Builder, string, error) {
 		return builder, "", fmt.Errorf("failed to create directories: %w", err)
 	}
 
-	// ImageConfig.ScriptMap에 지정된 스크립트 복사
+	// ImageConfig.ScriptMap 에 지정된 스크립트 복사
 	if err = copyScripts(builder, config.Image.ScriptMap); err != nil {
 		return builder, "", fmt.Errorf("failed to copy scripts: %w", err)
 	}
