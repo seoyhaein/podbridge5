@@ -88,6 +88,7 @@ func WithHealthChecker(inCmd, interval string, retries uint, timeout, startPerio
 }
 
 // RunContainer TODO: WithHealthChecker("CMD-SHELL /app/healthcheck.sh", "2s", 3, "30s", "1s") 이게 들어가 있기때문에, 또한 파마리터 내용에 대해서도 생각해보자
+// TODO 동적으로 바뀔가능성이 생김 컨테이너의 리소스나 마운트 문제가 발생함. 따라서 수정해야함. 볼륨도 추가해줘야 함. spec 을 입력 파라미터로 받는 것으로 바꿔줘야 함.
 func RunContainer(internalImageName, containerName string, tty bool) (string, error) {
 	// pbCtx 는 전역 context 임.
 	if pbCtx == nil {

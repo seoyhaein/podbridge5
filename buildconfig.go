@@ -274,6 +274,7 @@ func NewConfigFromFile(configPath string) (*BuildConfig, error) {
 	return &cfg, nil
 }
 
+// 아래는 스트리밍 방식임.
 /*func NewConfigFromFile(configPath string) (*BuildConfig, error) {
 	configPath, err := utils.CheckPath(configPath)
 	if err != nil {
