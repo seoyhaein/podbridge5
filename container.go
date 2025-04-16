@@ -73,6 +73,13 @@ func WithTerminal(terminal bool) ContainerOptions {
 	}
 }
 
+func WithCommand(cmd []string) ContainerOptions {
+	return func(spec *specgen.SpecGenerator) error {
+		spec.Command = cmd
+		return nil
+	}
+}
+
 // WithHealthChecker healthcheck 설정에 문제가 발생하면 에러를 반환
 func WithHealthChecker(inCmd, interval string, retries uint, timeout, startPeriod string) ContainerOptions {
 	return func(spec *specgen.SpecGenerator) error {
