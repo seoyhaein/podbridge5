@@ -64,3 +64,6 @@ conf, err := config.Default()
 capabilitiesForRoot, err := conf.Capabilities("root", nil, nil)
 isolation, err := parse.IsolationOption("")
 ```
+
+### 잡담.
+https://www.a-swe.net/
