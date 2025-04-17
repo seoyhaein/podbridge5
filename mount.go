@@ -1,24 +1,28 @@
 package podbridge5
 
 import (
+	"fmt"
 	"github.com/containers/podman/v5/pkg/specgen"
 	specgo "github.com/opencontainers/runtime-spec/specs-go"
+	"os"
 )
 
-// TODO 관련 정보를 가져와서 구체적으로 WithMount 을 사용할 수 있도록 하는 api 가 필요하다.
-// TODO unmount 도 생각해야함.
-
-// 주의사항 source, destination 은 이미 생성되어 있다고 가정한다.
-
+// WithMount 컨테이너에서 bind mount 같은 경우 마운트할 디렉토리가 없으면 자동으로 만들어줌. 또한 stop 이나 remove 하면 자동으로 unmount 됨.
 func WithMount(source, destination, mountType string) ContainerOptions {
 	return func(spec *specgen.SpecGenerator) error {
-		// 만약 spec.Mounts 필드가 nil 이면 초기화
+		// 1) 호스트 경로가 실제로 있는지 검사
+		if fi, err := os.Stat(source); err != nil {
+			return fmt.Errorf("host path %q does not exist: %w", source, err)
+		} else if !fi.IsDir() {
+			return fmt.Errorf("host path %q exists but is not a directory", source)
+		}
+		// 2) spec.Mounts 초기화
 		if spec.Mounts == nil {
 			spec.Mounts = []specgo.Mount{}
 		}
-		// mountType 은 보통 "bind"로 설정
+		// 3) mountType("bind" 등)과 source, destination 설정
 		spec.Mounts = append(spec.Mounts, specgo.Mount{
-			Type:        mountType,   // 예: "bind"
+			Type:        mountType,   // "bind"
 			Source:      source,      // 호스트 경로
 			Destination: destination, // 컨테이너 내부 경로
 		})

@@ -36,10 +36,8 @@ func TestProcessScript(t *testing.T) {
 	// 테스트 경로 설정
 	testPath := "./test-scripts"
 
-	scriptContent := `sleep 5
-echo "Hello, World!dfdfdfdfd"`
-	/*	scriptContent := `#!/bin/bash
-		echo "Hello, World!"`*/
+	scriptContent := `#!/bin/bash
+echo "Hello, World!"`
 
 	// 디렉토리 생성
 	if err := os.MkdirAll(testPath, 0755); err != nil {

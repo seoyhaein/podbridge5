@@ -82,47 +82,34 @@ func WithCommand(cmd []string) ContainerOptions {
 
 // WithHealthChecker healthcheck 설정에 문제가 발생하면 에러를 반환
 func WithHealthChecker(inCmd, interval string, retries uint, timeout, startPeriod string) ContainerOptions {
+	// 한 번만 파싱/검증
+	hc, err := setHealthChecker(inCmd, interval, retries, timeout, startPeriod)
 	return func(spec *specgen.SpecGenerator) error {
-		healthConfig, err := setHealthChecker(inCmd, interval, retries, timeout, startPeriod)
 		if err != nil {
-			// TODO: healthcheck 설정이 실패하면 컨테이너 상태를 알 수 없으므로, 적절한 에러 처리 후 중단.
-			Log.Errorf("Failed to set healthConfig: %v", err)
-			return err
+			// 옵션 생성 시점에 실패 원인을 그대로 반환
+			return fmt.Errorf("invalid healthcheck config: %w", err)
 		}
-		spec.HealthConfig = healthConfig
+		spec.HealthConfig = hc
 		return nil
 	}
 }
 
-// RunContainer TODO: WithHealthChecker("CMD-SHELL /app/healthcheck.sh", "2s", 3, "30s", "1s") 이게 들어가 있기때문에, 또한 파마리터 내용에 대해서도 생각해보자
-// TODO 동적으로 바뀔가능성이 생김 컨테이너의 리소스나 마운트 문제가 발생함. 따라서 수정해야함. 볼륨도 추가해줘야 함. spec 을 입력 파라미터로 받는 것으로 바꿔줘야 함.
-func RunContainer(internalImageName, containerName string, tty bool) (string, error) {
+func StartContainer(ctx context.Context, spec *specgen.SpecGenerator) (string, error) {
 	// pbCtx 는 전역 context 임.
-	if pbCtx == nil {
-		return "", errors.New("pbCtx is nil")
+	if ctx == nil {
+		return "", errors.New("context is nil")
+	}
+	if spec == nil {
+		return "", errors.New("spec is nil")
 	}
 
-	// TODO: WithHealthChecker 이건 여기서 고정하는 것에 대해서 생각해보자
-	spec, err := NewSpec(
-		WithImageName(internalImageName),
-		WithName(containerName),
-		WithTerminal(tty),
-		WithHealthChecker("CMD-SHELL bash /app/healthcheck.sh", "1s", 1, "30s", "0s"),
-	)
+	ccr, err := CreateContainer(ctx, spec)
 	if err != nil {
-		Log.Errorf("failed to create spec: %v", err)
-		return "", fmt.Errorf("failed to create spec: %w", err)
+		return "", fmt.Errorf("create container: %w", err)
 	}
 
-	ccr, err := CreateContainer(pbCtx, spec)
-	if err != nil {
-		Log.Errorf("failed to create container: %v", err)
-		return "", fmt.Errorf("failed to create container: %w", err)
-	}
-
-	if err := containers.Start(pbCtx, ccr.ID, &containers.StartOptions{}); err != nil {
-		Log.Errorf("failed to start container: %v", err)
-		return "", fmt.Errorf("failed to start container: %w", err)
+	if err := containers.Start(ctx, ccr.ID, &containers.StartOptions{}); err != nil {
+		return "", fmt.Errorf("start container: %w", err)
 	}
 
 	return ccr.ID, nil
@@ -232,24 +219,36 @@ func HealthCheckContainer(containerId string) (status *string, exitCode *int, er
 
 // handleExistingContainer 컨테이너가 존재했을 경우 해당 컨테이너의 정보를 리턴함.
 func handleExistingContainer(ctx context.Context, containerName string) (*CreateContainerResult, error) {
-	containerData, err := containers.Inspect(ctx, containerName, &containers.InspectOptions{Size: utils.PFalse})
+	info, err := containers.Inspect(ctx, containerName, &containers.InspectOptions{Size: utils.PFalse})
 	if err != nil {
-		Log.Errorf("Failed to inspect container: %v", err)
-		return nil, fmt.Errorf("failed to inspect container: %w", err)
+		return nil, fmt.Errorf("failed to inspect container %q: %w", containerName, err)
 	}
 
+	s := info.State
 	var status ContainerStatus
-	if containerData.State.Running {
-		Log.Infof("%s container is already running", containerName)
+
+	switch {
+	case s.Running:
 		status = Running
-	} else {
-		Log.Infof("%s container already exists", containerName)
+	case s.Paused:
+		status = Paused
+	case s.Dead:
+		status = Dead
+	case s.ExitCode >= 0:
+		// 프로세스가 종료된 상태
+		if s.ExitCode == 0 {
+			status = Exited
+		} else {
+			status = ExitedErr
+		}
+	default:
+		// 생성만 되고 아직 시작되지 않은 상태
 		status = Created
 	}
 
 	return &CreateContainerResult{
 		Name:   containerName,
-		ID:     containerData.ID,
+		ID:     info.ID,
 		Status: status,
 	}, nil
 }
