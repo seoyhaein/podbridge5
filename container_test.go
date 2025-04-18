@@ -571,3 +571,158 @@ func TestHandleExistingContainer_NonExistent(t *testing.T) {
 		t.Fatalf("expected error for non-existent container %q, got none", name)
 	}
 }
+
+func TestStartContainer(t *testing.T) {
+	t.Parallel()
+
+	ctx, err := NewConnectionLinux5(context.Background())
+	if err != nil {
+		t.Fatalf("NewConnectionLinux5() failed: %v", err)
+	}
+
+	t.Run("success", func(t *testing.T) {
+		t.Parallel()
+
+		// 1) Prepare a spec: use sleep so it stays running long enough
+		name := "test-start-" + uuid.New().String()
+		spec, err := NewSpec(
+			WithImageName("docker.io/library/busybox:latest"),
+			WithName(name),
+			WithTerminal(false),
+			WithCommand([]string{"sleep", "30"}),
+		)
+		if err != nil {
+			t.Fatalf("failed to build spec: %v", err)
+		}
+
+		// 2) StartContainer should create and start the container
+		id, err := StartContainer(ctx, spec)
+		if err != nil {
+			t.Fatalf("StartContainer failed: %v", err)
+		}
+		if id == "" {
+			t.Fatal("expected non-empty container ID")
+		}
+
+		// 3) Schedule cleanup
+		t.Cleanup(func() {
+			timeout := uint(5)
+			ignore := true
+			_ = containers.Stop(ctx, id, &containers.StopOptions{
+				Ignore:  &ignore,
+				Timeout: &timeout,
+			})
+			force := true
+			vols := true
+			_, _ = containers.Remove(ctx, id, &containers.RemoveOptions{
+				Force:   &force,
+				Volumes: &vols,
+				Ignore:  &ignore,
+			})
+		})
+
+		// 4) Inspect to confirm running state
+		info, err := containers.Inspect(ctx, name, nil)
+		if err != nil {
+			t.Fatalf("Inspect failed: %v", err)
+		}
+		if !info.State.Running {
+			t.Errorf("expected container to be running, got state %q", info.State.Status)
+		}
+	})
+
+	t.Run("nil context", func(t *testing.T) {
+		_, err := StartContainer(nil, &specgen.SpecGenerator{})
+		if err == nil {
+			t.Fatal("expected error for nil context, got nil")
+		}
+		if err.Error() != "context is nil" {
+			t.Errorf("expected 'context is nil' error, got: %v", err)
+		}
+	})
+
+	t.Run("nil spec", func(t *testing.T) {
+		_, err := StartContainer(ctx, nil)
+		if err == nil {
+			t.Fatal("expected error for nil spec, got nil")
+		}
+		if err.Error() != "spec is nil" {
+			t.Errorf("expected 'spec is nil' error, got: %v", err)
+		}
+	})
+}
+
+func TestContainerResourceLimitsEnforced(t *testing.T) {
+	t.Parallel()
+
+	// 1) Podman 연결
+	ctx, err := NewConnectionLinux5(context.Background())
+	if err != nil {
+		t.Fatalf("NewConnectionLinux5() failed: %v", err)
+	}
+
+	// 2) 고유한 컨테이너 이름
+	name := "res-test-" + uuid.New().String()
+
+	// 3) 스펙 생성: CPU 50ms/100ms, 512 shares; 메모리 64MiB; OOM score +200
+	spec, err := NewSpec(
+		WithImageName("docker.io/library/busybox:latest"),
+		WithName(name),
+		WithTerminal(false),
+		WithCPULimits(50000, 100000, 512),
+		WithMemoryLimit(64*1024*1024),
+		WithOOMScoreAdj(200),
+		WithCommand([]string{"sh", "-c", "sleep 10"}),
+	)
+	if err != nil {
+		t.Fatalf("failed to build spec: %v", err)
+	}
+
+	// 4) 컨테이너 생성·시작
+	id, err := StartContainer(ctx, spec)
+	if err != nil {
+		t.Fatalf("StartContainer failed: %v", err)
+	}
+
+	// 5) 테스트가 끝나면 항상 정리
+	t.Cleanup(func() {
+		timeout := uint(5)
+		ignore := true
+		_ = containers.Stop(ctx, id, &containers.StopOptions{Ignore: &ignore, Timeout: &timeout})
+		force := true
+		vols := true
+		_, _ = containers.Remove(ctx, id, &containers.RemoveOptions{
+			Force:   &force,
+			Volumes: &vols,
+			Ignore:  &ignore,
+		})
+	})
+
+	// 6) Inspect 호출해 리소스 설정 확인
+	info, err := containers.Inspect(ctx, id, nil)
+	if err != nil {
+		t.Fatalf("Inspect failed: %v", err)
+	}
+
+	hc := info.HostConfig
+	// 7) CPU limit 검증
+	if hc.CpuQuota != 50000 {
+		t.Errorf("CpuQuota = %d; want %d", hc.CpuQuota, 50000)
+	}
+	if hc.CpuPeriod != 100000 {
+		t.Errorf("CpuPeriod = %d; want %d", hc.CpuPeriod, 100000)
+	}
+	if hc.CpuShares != 512 {
+		t.Errorf("CpuShares = %d; want %d", hc.CpuShares, 512)
+	}
+
+	// 8) 메모리 limit 검증
+	if hc.Memory != 64*1024*1024 {
+		t.Errorf("Memory = %d; want %d", hc.Memory, 64*1024*1024)
+	}
+
+	// 9) OOMScoreAdj 검증
+	if hc.OomScoreAdj != 200 {
+		t.Errorf("OomScoreAdj = %d; want %d", hc.OomScoreAdj, 200)
+	}
+}

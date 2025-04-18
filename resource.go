@@ -8,28 +8,33 @@ import (
 	"github.com/containers/podman/v5/pkg/bindings/containers"
 	"github.com/containers/podman/v5/pkg/specgen"
 	"github.com/opencontainers/runtime-spec/specs-go"
-	"log"
 	"os"
 	"strconv"
 	"time"
 )
 
-// TODO 테스트 아직 안해봄.
-
 // LogContainerStatsToCSV 지정한 컨테이너의 리소스 사용량(CPU, Memory 등)을 일정 간격으로 CSV 파일에 기록
-// interval 은 일단 5 sec 으로 해준다. 밑에 그렇게 적용했음. TODO 하지만 이 값도 측정해보고 결정하자.
-func LogContainerStatsToCSV(ctx context.Context, containerID string, interval int) error {
-	// CSV 파일 이름을 containerID를 기반으로 생성 (예: "<containerID>_stats.csv")
-	csvFilePath := containerID + "_stats.csv"
+func LogContainerStatsToCSV(ctx context.Context, containerID string, intervalSec int) error {
+	csvPath := containerID + "_stats.csv"
 
-	// CSV 파일을 열거나 없으면 생성, 이어쓰기 모드로 엽니다.
-	file, err := os.OpenFile(csvFilePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	// 1) 기존 파일이 있으면 삭제
+	if _, err := os.Stat(csvPath); err == nil {
+		// 파일이 존재한다면
+		if err := os.Remove(csvPath); err != nil {
+			return fmt.Errorf("failed to remove existing CSV file %q: %w", csvPath, err)
+		}
+	} else if !os.IsNotExist(err) {
+		// Stat 자체가 에러인데 NotExist 가 아니라면
+		return fmt.Errorf("failed to stat CSV file %q: %w", csvPath, err)
+	}
+
+	// 2) 새로 파일 생성 (쓰기 전용)
+	file, err := os.OpenFile(csvPath, os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create CSV file %q: %w", csvPath, err)
 	}
 	defer func() {
-		cErr := file.Close()
-		if cErr != nil {
+		if cErr := file.Close(); cErr != nil {
 			Log.Infof("Failed to close file: %v", cErr)
 		}
 	}()
@@ -37,66 +42,45 @@ func LogContainerStatsToCSV(ctx context.Context, containerID string, interval in
 	writer := csv.NewWriter(file)
 	defer writer.Flush()
 
-	// 헤더 기록 (이미 기록되어 있다면 중복 기록 방지 로직 추가 가능)
+	// 3) 헤더 기록
 	header := []string{"Timestamp", "CPUNano", "MemUsage"}
 	if err := writer.Write(header); err != nil {
-		return err
+		return fmt.Errorf("failed to write CSV header: %w", err)
+	}
+	writer.Flush()
+	if err := writer.Error(); err != nil {
+		return fmt.Errorf("flush CSV header: %w", err)
 	}
 
-	// 컨테이너 ID를 슬라이스로 설정
-	containerIDs := []string{containerID}
-
-	// Stats 옵션 설정:
-	// - WithAll(false): 지정한 컨테이너에 대해서만 통계 수집
-	// - WithStream(true): 스트리밍 모드 활성화 (API가 주기적으로 stats 데이터를 채널로 전송)
-	// - WithInterval(5): 5초 간격으로 데이터를 전송
-	statsOpts := new(containers.StatsOptions).WithAll(false).WithStream(true).WithInterval(interval)
-
-	// 컨테이너의 stats 데이터를 스트리밍 채널로 받음.
-	statsChan, err := containers.Stats(ctx, containerIDs, statsOpts)
+	// 4) Stats 스트리밍 구독 & 기록 (기존 로직 유지)
+	statsOpts := new(containers.StatsOptions).
+		WithAll(false).
+		WithStream(true).
+		WithInterval(intervalSec)
+	statsCh, err := containers.Stats(ctx, []string{containerID}, statsOpts)
 	if err != nil {
-		return fmt.Errorf("컨테이너 %s stats 조회 실패: %w", containerID, err)
+		return fmt.Errorf("failed to subscribe stats for container %s: %w", containerID, err)
 	}
 
-	// 스트리밍 채널에서 stats 데이터를 수신하며 CSV 파일에 기록
-	//	참고
-	//	type ContainerStatsReport struct {
-	//		// Error from reading stats.
-	//		Error error
-	//		// Results, set when there is no error.
-	//		Stats []define.ContainerStats
-	//	}
-	// 여기서 Stats []define.ContainerStats 인 이유는 containers.Stats 이 메서드 자체가 여러 컨테이너에 대해서 stat 데이터를 가져올 수 있도록 만들어졌기 때문.
-	for statReport := range statsChan {
-		// 만약 리포트에 에러가 있다면 로그로 남기고 건너뜁니다.
-		if statReport.Error != nil {
-			log.Printf("stats 리포트 에러: %v", statReport.Error)
+	for report := range statsCh {
+		if report.Error != nil {
+			if errors.Is(report.Error, context.DeadlineExceeded) {
+				return nil
+			}
+			return fmt.Errorf("stats report error: %w", report.Error)
+		}
+		if len(report.Stats) == 0 {
+			Log.Warnf("stats data is empty")
 			continue
 		}
-
-		// stats 슬라이스가 비어 있다면 건너뜁니다.
-		if len(statReport.Stats) == 0 {
-			log.Printf("stats 데이터가 비어 있습니다.")
-			continue
+		cs := report.Stats[0]
+		rec := []string{
+			time.Now().Format(time.RFC3339),
+			strconv.FormatUint(cs.CPUNano, 10),
+			strconv.FormatUint(cs.MemUsage, 10),
 		}
-
-		// 참고 여기서는 확인할 컨테이너의 수가 하나임으로 첫번째 값을 선택함.
-		cs := statReport.Stats[0]
-		// 예시: CPUNano 와 MemUsage 를 문자열로 변환하여 기록합니다.
-		cpuUsageStr := strconv.FormatUint(cs.CPUNano, 10)
-		memoryUsageStr := strconv.FormatUint(cs.MemUsage, 10)
-
-		// 현재 시간을 타임스탬프로 사용합니다.
-		t := time.Now()
-
-		record := []string{
-			t.Format(time.RFC3339),
-			cpuUsageStr,
-			memoryUsageStr,
-		}
-
-		if err := writer.Write(record); err != nil {
-			log.Printf("CSV 기록 실패: %v", err)
+		if err := writer.Write(rec); err != nil {
+			Log.Warnf("failed to write CSV record: %v", err)
 		}
 		writer.Flush()
 	}
@@ -134,6 +118,37 @@ func WithCPULimits(cpuQuota int64, cpuPeriod uint64, cpuShares uint64) Container
 	}
 }
 
+// WithNanoCPUs cgroup v2 호환 방식으로 NanoCPUs를 설정
+// nanoCPUs: 1 CPU = 1_000_000_000 (1e9), 0.05 CPU = 50_000_000, 등
+func WithNanoCPUs(nanoCPUs int64) ContainerOptions {
+	return func(spec *specgen.SpecGenerator) error {
+		// 1) ContainerResourceConfig.ResourceLimits 초기화
+		if spec.ResourceLimits == nil {
+			spec.ResourceLimits = &specs.LinuxResources{}
+		}
+		if spec.ResourceLimits.CPU == nil {
+			spec.ResourceLimits.CPU = &specs.LinuxCPU{}
+		}
+
+		// 2) cgroup v1/v2 모두 기본 period 100_000µs 사용
+		const defaultPeriod = 100_000
+
+		// 3) nanoCPUs → quota(us) 계산: nanoCPUs × period / 1e9
+		quota := int64(nanoCPUs * int64(defaultPeriod) / 1_000_000_000)
+
+		// 4) 설정
+		spec.ResourceLimits.CPU.Period = ptrUint64(defaultPeriod)
+		spec.ResourceLimits.CPU.Quota = &quota
+
+		return nil
+	}
+}
+
+// helper functions to take address of primitives
+func ptrInt64(v int64) *int64    { return &v }
+func ptrUint64(v uint64) *uint64 { return &v }
+func ptrInt(v int) *int          { return &v }
+
 // WithMemoryLimit 설정은 컨테이너의 메모리 제한을 구성
 // memLimit: 메모리 제한 값(바이트 단위)
 func WithMemoryLimit(memLimit int64) ContainerOptions {
@@ -170,7 +185,7 @@ spec, err := NewSpec(
 )
 */
 
-// RunContainerWithStats TODO 수정 많이 해야함. 그냥 spec 을 입력 값으로 받는 것을 만드는게 낳을 듯.
+// RunContainerWithStats TODO 수정 많이 해야함. 그냥 spec 을 입력 값으로 받는 것을 만드는게 낳을 듯. 삭제 예정.
 func RunContainerWithStats(
 	internalImageName, containerName string,
 	tty, logStats bool,

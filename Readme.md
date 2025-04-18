@@ -1,12 +1,12 @@
 ## TODO
 - directory.md 관련해서 소스 수정 해야함 (중요.)  
-- container.go 테스트 파일 작성  
+~~- container.go 테스트 파일 작성~~  
 ~~- container 생성까지 작성. 테스트 파일 작성 필요.~~ (성공) 
 - policy.json 과 REGISTRIES.CONF 디폴트로 잡았는데 개발을 위해서 이거 세부적으로 잡아주어야 함. 
 ~~- healthcheck 구문 테스트 필요. shellscript 집어넣어야 함.~~  
 ~~- defer 구문 기억해내자.~~  
-- buildah 관련해서 buildah 도 필요한지 살펴본다. image.go 같은 경우는 이미지 빌드에 관련된 부분이라서 buildah 를 활용해야 한다. 
-- volume 관련해서는 notion 확인하고 진행하자.  
+~~- buildah 관련해서 buildah 도 필요한지 살펴본다. image.go 같은 경우는 이미지 빌드에 관련된 부분이라서 buildah 를 활용해야 한다.~~ 
+~~- volume 관련해서는 notion 확인하고 진행하자.~~  
 ~~- 이거 완료되면 podbridge 에 통합할 예정임.  v4 폴더와 v5 폴더 만들어서 적용함. 시간날때 해두자.~~  
 - Run 메서드 여러개 돌릴때 문제될 수 있음. 컨테이너 여러개 만들때 문제될 수 있음. Run 은 빨리 종료시켜야함.
 ~~- healthcheck 는 goroutine 으로 만들어 두고, 이것을 모니터링 하는 것도 goroutine 으로 하는 것이 좋을 것 같다.~~  

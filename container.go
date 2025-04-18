@@ -94,9 +94,8 @@ func WithHealthChecker(inCmd, interval string, retries uint, timeout, startPerio
 	}
 }
 
-// StartContainer TODO 이거 테스트 하고 오류 지워야 함.
+// StartContainer 컨테이너를 만들고 시작함.
 func StartContainer(ctx context.Context, spec *specgen.SpecGenerator) (string, error) {
-	// pbCtx 는 전역 context 임.
 	if ctx == nil {
 		return "", errors.New("context is nil")
 	}
