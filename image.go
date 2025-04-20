@@ -392,7 +392,7 @@ func copyScripts(builder *buildah.Builder, scripts map[string][]string) error {
 	return nil
 }
 
-// saveImage saves the built image to an archive file.
+// saveImage saves the built image to an archive file. TODO 파일 읽는 부분 살펴봐야 함. outputFile, err := os.OpenFile(archivePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 func saveImage(ctx context.Context, path, imageName, imageId string, compress bool) error {
 	// imageName 이미 태그를 포함한 완전한 이름이어야 함
 	// 예: "docker.io/library/alpine-internal:latest"

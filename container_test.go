@@ -2,8 +2,10 @@ package podbridge5
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/containers/image/v5/manifest"
+	"github.com/containers/podman/v5/libpod/define"
 	"github.com/containers/podman/v5/pkg/bindings/containers"
 	"github.com/containers/podman/v5/pkg/specgen"
 	"github.com/google/uuid"
@@ -389,7 +391,7 @@ func TestHandleExistingContainer_NonExistentContainer(t *testing.T) {
 	t.Logf("handleExistingContainer correctly failed for %q: %v", name, err)
 }
 
-func createTestContainer(t *testing.T, ctx context.Context, cmd []string) (name, id string) {
+func createTestContainer(t *testing.T, ctx context.Context, cmd []string, opts ...ContainerOptions) (name, id string) {
 	name = "test-" + uuid.New().String()
 	spec, err := NewSpec(
 		WithImageName("docker.io/library/busybox:latest"),
@@ -400,12 +402,18 @@ func createTestContainer(t *testing.T, ctx context.Context, cmd []string) (name,
 	if err != nil {
 		t.Fatalf("failed to build spec for %s: %v", name, err)
 	}
+	// Apply additional container options (e.g., healthcheck)
+	for _, o := range opts {
+		if err := o(spec); err != nil {
+			t.Fatalf("failed to apply container option for %s: %v", name, err)
+		}
+	}
+	// Create container using our CreateContainer helper
 	res, err := CreateContainer(ctx, spec)
 	if err != nil {
 		t.Fatalf("failed to create container %s: %v", name, err)
 	}
-	id = res.ID
-	return
+	return name, res.ID
 }
 
 func cleanupContainer(t *testing.T, ctx context.Context, id string) {
@@ -413,12 +421,14 @@ func cleanupContainer(t *testing.T, ctx context.Context, id string) {
 	force := true
 	vols := true
 	timeout := uint(5)
-	_ = containers.Stop(ctx, id, &containers.StopOptions{Ignore: &ignore, Timeout: &timeout})
-	_, _ = containers.Remove(ctx, id, &containers.RemoveOptions{
-		Force:   &force,
-		Volumes: &vols,
-		Ignore:  &ignore,
-	})
+	// Stop container
+	if err := containers.Stop(ctx, id, &containers.StopOptions{Ignore: &ignore, Timeout: &timeout}); err != nil {
+		t.Logf("warning: stop container %s: %v", id, err)
+	}
+	// Remove container
+	if _, err := containers.Remove(ctx, id, &containers.RemoveOptions{Force: &force, Volumes: &vols, Ignore: &ignore}); err != nil {
+		t.Logf("warning: remove container %s: %v", id, err)
+	}
 }
 
 func TestHandleExistingContainer_Created(t *testing.T) {
@@ -652,6 +662,7 @@ func TestStartContainer(t *testing.T) {
 	})
 }
 
+// TestContainerResourceLimitsEnforced 지금 실패함. podman 설정을 바꿔줘야 함.
 func TestContainerResourceLimitsEnforced(t *testing.T) {
 	t.Parallel()
 
@@ -724,5 +735,158 @@ func TestContainerResourceLimitsEnforced(t *testing.T) {
 	// 9) OOMScoreAdj 검증
 	if hc.OomScoreAdj != 200 {
 		t.Errorf("OomScoreAdj = %d; want %d", hc.OomScoreAdj, 200)
+	}
+}
+
+// 원래 InspectContainer 를 호출하기 전에 DI를 가능하도록 함수 포인터를 분리함 일단 이렇게 테스트 진행.
+var inspectFn = InspectContainer
+
+// HealthCheckContainerTest 내부에서 inspectFn을 사용하도록 변경합니다.
+func HealthCheckContainerTest(ctx context.Context, containerID string) (status string, exitCode int, err error) {
+	data, err := inspectFn(ctx, containerID)
+	if err != nil {
+		return "", -1, err
+	}
+
+	if data.State.Status == "" {
+		return "", -1, errors.New("container state status is empty")
+	}
+	status = data.State.Status
+
+	if data.State.Health == nil || len(data.State.Health.Log) == 0 {
+		return status, -1, nil
+	}
+
+	for _, entry := range data.State.Health.Log {
+		if entry.ExitCode != 0 {
+			return status, entry.ExitCode, nil
+		}
+	}
+
+	return status, 0, nil
+}
+
+func TestHealthCheckContainer(t *testing.T) {
+	// 원래 함수 백업
+	orig := inspectFn
+	defer func() { inspectFn = orig }()
+
+	tests := []struct {
+		name         string
+		mockData     *define.InspectContainerData
+		mockErr      error
+		wantStatus   string
+		wantExitCode int
+		wantErr      bool
+	}{
+		{
+			name:         "Inspect error",
+			mockData:     nil,
+			mockErr:      errors.New("inspect failed"),
+			wantStatus:   "",
+			wantExitCode: -1,
+			wantErr:      true,
+		},
+		{
+			name:         "Empty status",
+			mockData:     &define.InspectContainerData{State: &define.InspectContainerState{Status: ""}},
+			mockErr:      nil,
+			wantStatus:   "",
+			wantExitCode: -1,
+			wantErr:      true,
+		},
+		{
+			name:         "No health info",
+			mockData:     &define.InspectContainerData{State: &define.InspectContainerState{Status: "running", Health: nil}},
+			mockErr:      nil,
+			wantStatus:   "running",
+			wantExitCode: -1,
+			wantErr:      false,
+		},
+		{
+			name: "First unhealthy exit code",
+			mockData: &define.InspectContainerData{State: &define.InspectContainerState{
+				Status: "running",
+				Health: &define.HealthCheckResults{Log: []define.HealthCheckLog{{ExitCode: 0}, {ExitCode: 2}}},
+			}},
+			mockErr:      nil,
+			wantStatus:   "running",
+			wantExitCode: 2,
+			wantErr:      false,
+		},
+		{
+			name: "All healthy logs",
+			mockData: &define.InspectContainerData{State: &define.InspectContainerState{
+				Status: "running",
+				Health: &define.HealthCheckResults{Log: []define.HealthCheckLog{{ExitCode: 0}, {ExitCode: 0}}},
+			}},
+			mockErr:      nil,
+			wantStatus:   "running",
+			wantExitCode: 0,
+			wantErr:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			inspectFn = func(ctx context.Context, containerID string) (*define.InspectContainerData, error) {
+				return tt.mockData, tt.mockErr
+			}
+
+			status, code, err := HealthCheckContainerTest(context.Background(), "test")
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("%s: expected error, got nil", tt.name)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("%s: unexpected error: %v", tt.name, err)
+			}
+			if status != tt.wantStatus {
+				t.Errorf("%s: status = %q, want %q", tt.name, status, tt.wantStatus)
+			}
+			if code != tt.wantExitCode {
+				t.Errorf("%s: exitCode = %d, want %d", tt.name, code, tt.wantExitCode)
+			}
+		})
+	}
+}
+
+func TestHealthCheckContainerIntegration(t *testing.T) {
+	ctx, err := NewConnectionLinux5(context.Background())
+	if err != nil {
+		t.Fatalf("failed to connect to Podman service: %v", err)
+	}
+
+	// Create a busybox container that runs indefinitely and always passes healthcheck
+	// 이미지안에 healthcheck.sh 가 없으면 실패한다.
+	_, id := createTestContainer(t, ctx,
+		[]string{"sh", "-c", "while true; do sleep 1; done"},
+		WithHealthChecker("CMD-SHELL bash /app/healthcheck.sh", "1s", 1, "30s", "0s"),
+	)
+	// Ensure cleanup
+	t.Cleanup(func() { cleanupContainer(t, ctx, id) })
+
+	// Start container
+	if err := containers.Start(ctx, id, nil); err != nil {
+		t.Fatalf("failed to start container %s: %v", id, err)
+	}
+
+	// Wait for healthcheck to run at least a couple of times
+	time.Sleep(6 * time.Second)
+
+	// Perform health check
+	status, exitCode, err := HealthCheckContainer(ctx, id)
+	if err != nil {
+		t.Fatalf("HealthCheckContainer returned error: %v", err)
+	}
+
+	// Verify results
+	if status != "running" {
+		t.Errorf("expected status 'running', got '%s'", status)
+	}
+	if exitCode != 0 {
+		t.Errorf("expected exitCode 0 for healthy container, got %d", exitCode)
 	}
 }

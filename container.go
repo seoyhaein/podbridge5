@@ -96,9 +96,6 @@ func WithHealthChecker(inCmd, interval string, retries uint, timeout, startPerio
 
 // StartContainer 컨테이너를 만들고 시작함.
 func StartContainer(ctx context.Context, spec *specgen.SpecGenerator) (string, error) {
-	if ctx == nil {
-		return "", errors.New("context is nil")
-	}
 	if spec == nil {
 		return "", errors.New("spec is nil")
 	}
@@ -168,53 +165,46 @@ func CreateContainer(ctx context.Context, conSpec *specgen.SpecGenerator) (*Crea
 	}, nil
 }
 
-func InspectContainer(containerId string) (*define.InspectContainerData, error) {
-	// pbCtx 는 전역 context 임.
-	if pbCtx == nil {
-		return nil, errors.New("pbCtx is nil")
+func InspectContainer(ctx context.Context, containerID string) (*define.InspectContainerData, error) {
+	data, err := containers.Inspect(ctx, containerID, &containers.InspectOptions{Size: utils.PFalse})
+	if err != nil {
+		return nil, fmt.Errorf("inspect container %q: %w", containerID, err)
 	}
-
-	var containerInspectOptions containers.InspectOptions
-	containerInspectOptions.Size = utils.PFalse
-	containerData, err := containers.Inspect(pbCtx, containerId, &containerInspectOptions)
-
-	return containerData, err
+	return data, nil
 }
 
-// HealthCheckContainer TODO 추후 테스트 필요. 확인 필요.
-func HealthCheckContainer(containerId string) (status *string, exitCode *int, err error) {
-	// 컨테이너 데이터 조회
-	containerData, err := InspectContainer(containerId)
+// HealthCheckContainer returns the container's Status string and an exitCode:
+//   - exitCode == -1 : no health information available
+//   - exitCode ==  0 : healthy or exitCode=0
+//   - exitCode  > 0 : the first nonzero exit code from health logs
+func HealthCheckContainer(ctx context.Context, containerID string) (status string, exitCode int, err error) {
+	// 1) Inspect
+	data, err := InspectContainer(ctx, containerID)
 	if err != nil {
-		// 오류 발생 시 상태와 종료 코드를 nil 로 반환
-		return nil, nil, err
+		return "", -1, err
 	}
 
-	// 상태 값이 비어 있는지 확인
-	containerStatus := containerData.State.Status
-	if utils.IsEmptyString(containerStatus) {
-		err = fmt.Errorf("container state status is empty")
-		return
+	// 2) 상태
+	if data.State.Status == "" {
+		return "", -1, fmt.Errorf("container %q state status is empty", containerID)
 	}
-	status = &containerStatus
+	status = data.State.Status
 
-	// Health 가 nil 이면, 종료 코드 없이 상태만 반환
-	if containerData.State.Health == nil {
-		return
+	// 3) 헬스 정보
+	if data.State.Health == nil || len(data.State.Health.Log) == 0 {
+		// 헬스체크가 설정되지 않았거나 로그가 없는 경우
+		return status, -1, nil
 	}
 
-	// Health 로그를 확인하여 ExitCode 가 0이 아닌 첫 번째 로그 반환
-	for _, log := range containerData.State.Health.Log {
-		if log.ExitCode != 0 {
-			exitCode = &log.ExitCode
-			return
+	// 로그에서 첫 번째 비정상 exitCode 찾기
+	for _, entry := range data.State.Health.Log {
+		if entry.ExitCode != 0 {
+			return status, entry.ExitCode, nil
 		}
 	}
 
-	// 모든 로그가 정상일 경우 0 종료 코드 반환
-	defaultExitCode := 0
-	exitCode = &defaultExitCode
-	return
+	// 모든 로그가 exitCode==0
+	return status, 0, nil
 }
 
 // handleExistingContainer 컨테이너가 존재했을 경우 해당 컨테이너의 정보를 리턴함.
