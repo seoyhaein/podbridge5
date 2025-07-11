@@ -24,61 +24,68 @@ func GenerateExecutor(path, fileName, userScriptPath string) (*os.File, *string,
 	}
 
 	executorPath := filepath.Join(path, fileName)
-	tmpFilePath := filepath.Join(path, fileName+".tmp") // 임시 파일 경로 설정
+	tmpFilePath := filepath.Join(path, fileName+".tmp")
 
-	// 임시 파일 생성
+	// Create temp file
 	tmpFile, err := os.Create(tmpFilePath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create temporary file: %w", err)
 	}
 
-	// 스크립트 내용을 작성
+	// Write the new executor script
 	scriptContent := fmt.Sprintf(`#!/usr/bin/env bash
+set -euo pipefail
 
-result_log="/app/result.log"
-temp_status_log="/app/exit_code_temp.log"  # 임시 로그 파일
-status_log="/app/exit_code.log"  # 종료 코드 기록용 로그 파일
-> "$result_log"
-> "$status_log"
-> "$temp_status_log"
+RESULT_LOG="/app/result.log"
+STATUS_LOG="/app/exit_code.log"
+LOCK_FILE="${STATUS_LOG}.lock"
 
-# long_task 함수
-long_task() {
-    if ! bash -n %s; then
-        echo "Syntax error in user_script.sh" | tee -a "$result_log"
-        return 1
-    fi
+# 로그 초기화
+: > "$RESULT_LOG"
 
-    bash %s 2>&1 | tee -a "$result_log"
-    task_exit_code=${PIPESTATUS[0]}
-    return $task_exit_code
+# 상태 기록 함수 (실패 시 바로 호출)
+record_failure() {
+    local code=$1
+    echo "exit_code:${code}" > "${STATUS_LOG}.tmp"
+    {
+        flock -x 200
+        mv "${STATUS_LOG}.tmp" "${STATUS_LOG}"
+    } 200> "$LOCK_FILE"
+    echo "Syntax error detected, exit_code=${code}" | tee -a "$RESULT_LOG"
+    exit "${code}"
 }
 
-long_task
-task_exit_code=$?
-
-# 임시 파일에 종료 코드 기록
-{
-    flock -e 200
-    echo "exit_code:$task_exit_code" > "$temp_status_log"
-} 200>"$temp_status_log.lock"
-
-# 임시 파일을 최종 파일로 이동
-mv "$temp_status_log" "$status_log"
-
-# 헬스체크를 위해서 넣음. TODO 추후 조정 필요
-sleep 10
-
-# 종료 코드 확인 및 에러 처리
-if [ "$task_exit_code" -ne 0 ]; then
-    echo "Task failed with exit code $task_exit_code" | tee -a "$result_log"
-else
-    echo "Task completed successfully" | tee -a "$result_log"
+# 1) %s 존재 및 문법 검사
+if [[ ! -f "%s" ]]; then
+    echo "Error: %s not found" | tee -a "$RESULT_LOG"
+    record_failure 1
 fi
 
-exit $task_exit_code`, userScriptPath, userScriptPath)
+if ! bash -n "%s"; then
+    echo "Syntax error in %s" | tee -a "$RESULT_LOG"
+    record_failure 1
+fi
 
-	// 임시 파일에 스크립트 내용 작성, err 같은 걸 쓰면 쉐도잉 현상 발생해서 error 혼동을 줄 수 있음. 명확하게 err 이름을 정하자.
+# 2) 실제 실행 및 정상 흐름
+bash "%s" 2>&1 | tee -a "$RESULT_LOG"
+EXIT_CODE=${PIPESTATUS[0]}
+
+# 3) 상태 기록 (정상/실패 공통)
+echo "exit_code:${EXIT_CODE}" > "${STATUS_LOG}.tmp"
+{
+    flock -x 200
+    mv "${STATUS_LOG}.tmp" "${STATUS_LOG}"
+} 200> "$LOCK_FILE"
+
+# 4) 최종 로그
+if (( EXIT_CODE != 0 )); then
+    echo "Task failed with exit code ${EXIT_CODE}" | tee -a "$RESULT_LOG"
+else
+    echo "Task completed successfully" | tee -a "$RESULT_LOG"
+fi
+
+exit "${EXIT_CODE}"`, userScriptPath, userScriptPath, userScriptPath, userScriptPath, userScriptPath, userScriptPath)
+
 	if _, writeErr := tmpFile.Write([]byte(scriptContent)); writeErr != nil {
 		if closeErr := tmpFile.Close(); closeErr != nil {
 			Log.Errorf("failed to close temporary file after write error: %v", closeErr)
@@ -86,10 +93,9 @@ exit $task_exit_code`, userScriptPath, userScriptPath)
 		return nil, nil, fmt.Errorf("failed to write script content to temporary file: %w", writeErr)
 	}
 
-	// 파일을 동기화한 후 닫음
 	if err := tmpFile.Sync(); err != nil {
 		if closeErr := tmpFile.Close(); closeErr != nil {
-			Log.Errorf("failed to close temporary file after write error: %v", closeErr)
+			Log.Errorf("failed to close temporary file after sync error: %v", closeErr)
 		}
 		return nil, nil, fmt.Errorf("failed to sync temporary file: %w", err)
 	}
@@ -97,37 +103,33 @@ exit $task_exit_code`, userScriptPath, userScriptPath)
 		return nil, nil, fmt.Errorf("failed to close temporary file: %w", err)
 	}
 
-	// 기존 파일이 있는지 확인
+	// Compare with existing file if present
 	if exists, _, err := utils.FileExists(executorPath); err != nil {
 		return nil, nil, fmt.Errorf("failed to check if original file exists: %w", err)
 	} else if exists {
-		// 기존 파일과 임시 파일 내용 비교
 		same, err := compareFiles(executorPath, tmpFilePath)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to compare files: %w", err)
 		}
-
-		// 파일 내용이 같으면 임시 파일 삭제 후 경로만 반환
 		if same {
 			if err := os.Remove(tmpFilePath); err != nil {
-				Log.Errorf("Failed to remove temporary file %s: %v", tmpFilePath, err)
-				return nil, nil, err
+				Log.Errorf("failed to remove temporary file %s: %v", tmpFilePath, err)
 			}
 			return nil, &executorPath, nil
 		}
 	}
 
-	// 파일이 다르거나 기존 파일이 없는 경우, 임시 파일을 최종 파일로 교체
+	// Rename temp to final
 	if err = os.Rename(tmpFilePath, executorPath); err != nil {
 		return nil, nil, fmt.Errorf("failed to rename temporary file to final file: %w", err)
 	}
 
-	// 파일 권한 설정
-	if err = os.Chmod(executorPath, 0777); err != nil {
+	// Set execute permissions
+	if err = os.Chmod(executorPath, 0755); err != nil {
 		return nil, nil, fmt.Errorf("failed to set file permissions: %w", err)
 	}
 
-	// 최종 파일을 열어서 반환 (열린 파일 포인터)
+	// Open final file for return
 	finalFile, err := os.Open(executorPath)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to open final executor file: %w", err)

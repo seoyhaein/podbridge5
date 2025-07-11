@@ -368,6 +368,7 @@ func setFilePermissions(builder *buildah.Builder, files []string) error {
 	return nil
 }
 
+// TODO 생각하기 이게 필요할지 고민해야함. install.sh 까지도.
 // installDependencies runs the install.sh script.
 func installDependencies(builder *buildah.Builder) error {
 	chmodArgs := []string{"/app/install.sh"}

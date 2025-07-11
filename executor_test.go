@@ -16,7 +16,7 @@ func TestGenerateExecutor(t *testing.T) {
 	if err := os.MkdirAll(testPath, 0755); err != nil {
 		t.Fatalf("failed to create test directory: %v", err)
 	}
-	defer os.RemoveAll(testPath) // 테스트 후 디렉토리 삭제
+	//defer os.RemoveAll(testPath) // 테스트 후 디렉토리 삭제
 
 	// generateExecutor 실행
 	_, executorPath, err := GenerateExecutor(testPath, fileName, cmd)
@@ -43,7 +43,7 @@ echo "Hello, World!"`
 	if err := os.MkdirAll(testPath, 0755); err != nil {
 		t.Fatalf("failed to create test directory: %v", err)
 	}
-	defer os.RemoveAll(testPath) // 테스트 후 디렉토리 삭제
+	//defer os.RemoveAll(testPath) // 테스트 후 디렉토리 삭제
 
 	// processScript 실행
 	scriptPath, err := ProcessScript(scriptContent, testPath)

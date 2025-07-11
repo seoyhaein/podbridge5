@@ -295,3 +295,5 @@ func setHealthChecker(inCmd, interval string, retries uint, timeout, startPeriod
 
 	return &hc, nil
 }
+
+// 데이터를 바인딩 해서 실행 시키는 것을 넣어 주어야 함. 볼륨
