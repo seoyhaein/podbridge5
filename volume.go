@@ -12,6 +12,8 @@ import (
 	"github.com/containers/podman/v5/pkg/specgen"
 	"io"
 	"log"
+	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -52,6 +54,8 @@ func WithNamedVolume(volumeName, dest, subPath string, options ...string) Contai
 	}
 }
 
+// TODO nfs, lustre 로 volume 을 원격지에 둘경우 대응해줘야 함. 지금은 local 만 해줌
+
 // CreateVolume 주어진 볼륨 이름을 기반으로 볼륨 만들어줌. ignoreIfExists true 이면, 동일한 볼륨이 있으면 에러 리턴하지 않고 그대로 사용.
 func CreateVolume(ctx context.Context, volumeName string, ignoreIfExists bool) (*entitiesTypes.VolumeConfigResponse, error) {
 	volConfig := entitiesTypes.VolumeCreateOptions{
@@ -91,6 +95,8 @@ func DeleteVolume(ctx context.Context, volumeName string, force *bool) error {
 	return nil
 }
 
+// 파일 하나 볼륨으로 만듬. 이거 없내는 방향으로 감.
+
 func WriteDataToVolume(ctx context.Context, volumeName, mountPath, fileName string, data []byte) error {
 	// 1. Create (or reuse) the volume.
 	vcr, err := CreateVolume(ctx, volumeName, false)
@@ -99,7 +105,6 @@ func WriteDataToVolume(ctx context.Context, volumeName, mountPath, fileName stri
 	}
 
 	// 2. Build the container specification.
-	// TODO: 추후 이미지 교체 필요.
 	spec, err := NewSpec(
 		WithImageName("docker.io/library/alpine:latest"),
 		WithName("temp-data-writer"),
@@ -169,6 +174,139 @@ func WriteDataToVolume(ctx context.Context, volumeName, mountPath, fileName stri
 
 	// Optionally, wait a short period for file extraction to complete.
 	time.Sleep(2 * time.Second)
+	return nil
+}
+
+func WriteFolderToVolume(parentCtx context.Context, volumeName, mountPath, hostDir string) error {
+	// 비동기 코드가 없더라도 withCancel 을 쓰면 cancel 을 해줘야, 메모리, 채널 누수가 발생할 수 있는 개연성을 없애준다. golang 권장사항임.
+	ctx, cancel := context.WithCancel(parentCtx)
+	defer cancel()
+
+	// 1. 볼륨 생성(또는 재사용)
+	vcr, err := CreateVolume(ctx, volumeName, false)
+	if err != nil {
+		return fmt.Errorf("failed to create volume: %w", err)
+	}
+
+	// 2. 컨테이너 스펙 생성
+	spec, err := NewSpec(
+		WithImageName("docker.io/library/alpine:latest"),
+		WithName("temp-folder-writer"),
+		WithCommand([]string{"sh", "-c", "mkdir -p " + mountPath + " && sleep infinity"}),
+		WithNamedVolume(vcr.Name, mountPath, ""),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to build container spec: %w", err)
+	}
+
+	// 3. 이미지 풀
+	exists, err := images.Exists(ctx, spec.Image, nil)
+	if err != nil {
+		return fmt.Errorf("failed to check image: %w", err)
+	}
+	if !exists {
+		if _, err := images.Pull(ctx, spec.Image, &images.PullOptions{}); err != nil {
+			return fmt.Errorf("failed to pull image: %w", err)
+		}
+	}
+
+	// 4. 임시 컨테이너 생성 & 5. 시작
+	createResp, err := containers.CreateWithSpec(ctx, spec, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create container: %w", err)
+	}
+	containerID := createResp.ID
+
+	defer func() {
+		if stopErr := containers.Stop(ctx, containerID, nil); stopErr != nil {
+			Log.Warnf("warning: failed to stop container %s: %v", containerID, stopErr)
+		}
+		if _, rmErr := containers.Remove(ctx, containerID, nil); rmErr != nil {
+			Log.Warnf("warning: failed to remove container %s: %v", containerID, rmErr)
+		}
+	}()
+
+	if err := containers.Start(ctx, containerID, nil); err != nil {
+		return fmt.Errorf("failed to start container: %w", err)
+	}
+
+	// 6. io.Pipe + 고루틴에서 tar 스트리밍 (에러 시 cancel & 로그 + 단일 defer 닫기)
+	pr, pw := io.Pipe()
+	go func() {
+		tw := tar.NewWriter(pw)
+		defer func() {
+			if tCerro := tw.Close(); tCerro != nil {
+				Log.Warnf("tar writer close error: %v", tCerro)
+			}
+		}()
+
+		// walkErr 상태에 따라 Close or CloseWithError 호출
+		var walkErr error
+		defer func() {
+			if walkErr != nil {
+				if pCerro := pw.CloseWithError(walkErr); pCerro != nil {
+					Log.Warnf("pipe close with error: %v", pCerro)
+				}
+			} else {
+				if cErr := pw.Close(); cErr != nil {
+					Log.Warnf("pipe close error: %v", cErr)
+				}
+			}
+		}()
+
+		// 호스트 디렉터리 순회하며 tar 작성
+		walkErr = filepath.Walk(hostDir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			relPath, err := filepath.Rel(hostDir, path)
+			if err != nil {
+				return err
+			}
+			if relPath == "." {
+				return nil
+			}
+
+			hdr, err := tar.FileInfoHeader(info, "")
+			if err != nil {
+				return err
+			}
+			hdr.Name = relPath
+			if err := tw.WriteHeader(hdr); err != nil {
+				return err
+			}
+
+			if !info.IsDir() {
+				f, err := os.Open(path)
+				if err != nil {
+					return err
+				}
+				defer func(f *os.File) {
+					err := f.Close()
+					if err != nil {
+						Log.Warnf("failed to close file %s: %v", path, err)
+					}
+				}(f)
+				if _, err := io.Copy(tw, f); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	}()
+
+	// 7. tar 스트림을 컨테이너에 복사 (ctx 관찰)
+	copyFunc, err := containers.CopyFromArchiveWithOptions(ctx, containerID, mountPath, pr, nil)
+	if err != nil {
+		return fmt.Errorf("failed to init copy: %w", err)
+	}
+	if err := copyFunc(); err != nil {
+		cancel()
+		return fmt.Errorf("failed to copy folder: %w", err)
+	}
+
+	// 8. 안정성 대기
+	time.Sleep(1 * time.Second)
 	return nil
 }
 
