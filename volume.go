@@ -107,10 +107,10 @@ func WriteFolderToVolume(parentCtx context.Context, volumeName, mountPath, hostD
 	// 0. hostDir 검증
 	st, err := os.Stat(hostDir)
 	if err != nil {
-		return fmt.Errorf("WriteFolderToVolume3: stat hostDir: %w", err)
+		return fmt.Errorf("WriteFolderToVolume: stat hostDir: %w", err)
 	}
 	if !st.IsDir() {
-		return fmt.Errorf("WriteFolderToVolume3: hostDir is not directory: %s", hostDir)
+		return fmt.Errorf("WriteFolderToVolume: hostDir is not directory: %s", hostDir)
 	}
 
 	var vcr *types.VolumeConfigResponse
@@ -121,31 +121,31 @@ func WriteFolderToVolume(parentCtx context.Context, volumeName, mountPath, hostD
 			return CreateVolume(c, n, false)
 		})
 		if err != nil {
-			return fmt.Errorf("WriteFolderToVolume3: overwrite volume setup: %w", err)
+			return fmt.Errorf("WriteFolderToVolume: overwrite volume setup: %w", err)
 		}
 
 	case ModeSkip:
 		exists, err := VolumeExists(ctx, volumeName)
 		if err != nil {
-			return fmt.Errorf("WriteFolderToVolume3: check existence (skip): %w", err)
+			return fmt.Errorf("WriteFolderToVolume: check existence (skip): %w", err)
 		}
 		if exists {
 			return nil
 		}
 		vcr, err = CreateVolume(ctx, volumeName, false)
 		if err != nil {
-			return fmt.Errorf("WriteFolderToVolume3: create volume (skip path): %w", err)
+			return fmt.Errorf("WriteFolderToVolume: create volume (skip path): %w", err)
 		}
 
 	case ModeUpdate:
 		exists, err := VolumeExists(ctx, volumeName)
 		if err != nil {
-			return fmt.Errorf("WriteFolderToVolume3: check existence (update): %w", err)
+			return fmt.Errorf("WriteFolderToVolume: check existence (update): %w", err)
 		}
 		if !exists {
 			vcr, err = CreateVolume(ctx, volumeName, false)
 			if err != nil {
-				return fmt.Errorf("WriteFolderToVolume3: create volume (update path): %w", err)
+				return fmt.Errorf("WriteFolderToVolume: create volume (update path): %w", err)
 			}
 		} else {
 			// 기존 볼륨 재사용
@@ -156,7 +156,7 @@ func WriteFolderToVolume(parentCtx context.Context, volumeName, mountPath, hostD
 		}
 
 	default:
-		return fmt.Errorf("WriteFolderToVolume3: unknown mode: %d", mode)
+		return fmt.Errorf("WriteFolderToVolume: unknown mode: %d", mode)
 	}
 
 	if vcr == nil {
@@ -182,18 +182,18 @@ func WriteFolderToVolume(parentCtx context.Context, volumeName, mountPath, hostD
 	// 2. 이미지 확인/풀
 	ok, err := images.Exists(ctx, spec.Image, nil)
 	if err != nil {
-		return fmt.Errorf("WriteFolderToVolume3: image exists check: %w", err)
+		return fmt.Errorf("WriteFolderToVolume: image exists check: %w", err)
 	}
 	if !ok {
 		if _, err := images.Pull(ctx, spec.Image, &images.PullOptions{}); err != nil {
-			return fmt.Errorf("WriteFolderToVolume3: image pull: %w", err)
+			return fmt.Errorf("WriteFolderToVolume: image pull: %w", err)
 		}
 	}
 
 	// 3. 컨테이너 생성 & 시작
 	createResp, err := containers.CreateWithSpec(ctx, spec, nil)
 	if err != nil {
-		return fmt.Errorf("WriteFolderToVolume3: container create: %w", err)
+		return fmt.Errorf("WriteFolderToVolume: container create: %w", err)
 	}
 	containerID := createResp.ID
 	defer func() {
@@ -205,7 +205,7 @@ func WriteFolderToVolume(parentCtx context.Context, volumeName, mountPath, hostD
 		}
 	}()
 	if err := containers.Start(ctx, containerID, nil); err != nil {
-		return fmt.Errorf("WriteFolderToVolume3: container start: %w", err)
+		return fmt.Errorf("WriteFolderToVolume: container start: %w", err)
 	}
 
 	// 4. tar 스트리밍 (WalkDir)
@@ -294,11 +294,11 @@ func WriteFolderToVolume(parentCtx context.Context, volumeName, mountPath, hostD
 	copyFunc, err := containers.CopyFromArchiveWithOptions(ctx, containerID, mountPath, pr, nil)
 	if err != nil {
 		cancel()
-		return fmt.Errorf("WriteFolderToVolume3: init copy: %w", err)
+		return fmt.Errorf("WriteFolderToVolume: init copy: %w", err)
 	}
 	if err := copyFunc(); err != nil {
 		cancel()
-		return fmt.Errorf("WriteFolderToVolume3: copy archive: %w", err)
+		return fmt.Errorf("WriteFolderToVolume: copy archive: %w", err)
 	}
 
 	wg.Wait()
