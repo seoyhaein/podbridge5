@@ -15,6 +15,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -32,8 +33,8 @@ const (
 
 // 주의 사항. 여기서 volumeName 생성이 전제되어 있다고 봐야 한다.
 
-// WithNamedVolume 네임드 볼륨 마운트 옵션
-func WithNamedVolume(volumeName, dest, subPath string, options ...string) ContainerOptions {
+// WithNamedVolume1 네임드 볼륨 마운트 옵션
+func WithNamedVolume1(volumeName, dest, subPath string, options ...string) ContainerOptions {
 	return func(spec *specgen.SpecGenerator) error {
 		// volumeName 이 비어있으면 익명 볼륨(anonymous volume)으로 처리
 		isAnonymous := false
@@ -63,6 +64,33 @@ func WithNamedVolume(volumeName, dest, subPath string, options ...string) Contai
 
 		// SpecGenerator 의 Volumes 필드에 새 볼륨 추가
 		spec.Volumes = append(spec.Volumes, newVol)
+		return nil
+	}
+}
+
+func WithNamedVolume(volumeName, dest, subPath string, options ...string) ContainerOptions {
+	return func(spec *specgen.SpecGenerator) error {
+		cleaned := strings.TrimSpace(volumeName)
+		if cleaned == "" {
+			return fmt.Errorf("WithNamedVolume: empty volumeName for dest %s", dest)
+		}
+
+		for _, vol := range spec.Volumes {
+			if vol.Dest == dest {
+				if vol.Name != cleaned {
+					return fmt.Errorf("WithNamedVolume: dest %s already mapped to %s", dest, vol.Name)
+				}
+				return nil
+			}
+		}
+
+		spec.Volumes = append(spec.Volumes, &specgen.NamedVolume{
+			Name:        cleaned,
+			Dest:        dest,
+			Options:     options,
+			IsAnonymous: false,
+			SubPath:     subPath, // 필요 없으면 먼저 제거해 테스트
+		})
 		return nil
 	}
 }

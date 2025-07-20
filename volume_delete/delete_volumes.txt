@@ -1,0 +1,11 @@
+- 지우지 말것.
+- docker volume ls 하면 나오는 것들
+- harbor 관련 volume
+726d48b842e67873119687d84f23b7be319cbcae1917caf7f5718142917217a7
+- prometheus 관련 volume
+6f6a8f908c39ebfecdd862ae43de3af8e6f7ff31e633ab7c227a6e590acf237b
+
+- 나머지 익명 볼륨은 지울것.
+
+- podman volume ls 로 해야 함.
+
