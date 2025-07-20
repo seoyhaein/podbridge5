@@ -57,7 +57,7 @@ func InitWithContext(ctx context.Context) (context.Context, error) {
 	return ctx, err
 }
 
-// Shutdown app main 에서 defer 로 처리해야함.
+// Shutdown app main 에서 defer 로 처리해야함. TODO 이거 낭비인거 같은데 확인하자.
 func Shutdown() error {
 	if pbStore == nil {
 		return fmt.Errorf("pbStore is nil")

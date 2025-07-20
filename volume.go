@@ -46,7 +46,7 @@ func WithNamedVolume(volumeName, dest, subPath string, options ...string) Contai
 				return nil
 			}
 		}
-
+		// TODO Option 하고 SubPath 확인하자.
 		spec.Volumes = append(spec.Volumes, &specgen.NamedVolume{
 			Name:        cleaned,
 			Dest:        dest,
@@ -79,6 +79,8 @@ func CreateVolume(ctx context.Context, volumeName string, ignoreIfExists bool) (
 	return volumeResp, nil
 }
 
+// TODO volumeex.go 에 겹치는게 있는데 이거 확인하자.
+
 func DeleteVolume(ctx context.Context, volumeName string, force *bool) error {
 	exists, err := volumes.Exists(ctx, volumeName, &volumes.ExistsOptions{})
 	if err != nil {
@@ -99,7 +101,8 @@ func DeleteVolume(ctx context.Context, volumeName string, force *bool) error {
 	return nil
 }
 
-// WriteFolderToVolume TODO 일단 테스트 필요 일단 붙이면서 보자.
+// WriteFolderToVolume TODO 일단 테스트 필요 일단 붙이면서 보자. Command 인자 정정 에러 개연성 문제와 동시성 문제 발생 가능성 확인해볼것. 생각보다 간단한 것도 시간이 걸림.
+// TODO 부가적으로 시간 또는 퍼센트를 나타내는 것을 추가할지 고민해야 함. 일단 합치는 것 부터 하고 나머지 진행하기로 함.
 func WriteFolderToVolume(parentCtx context.Context, volumeName, mountPath, hostDir string, mode VolumeMode) error {
 	ctx, cancel := context.WithCancel(parentCtx)
 	defer cancel()
@@ -176,7 +179,7 @@ func WriteFolderToVolume(parentCtx context.Context, volumeName, mountPath, hostD
 		WithNamedVolume(vcr.Name, mountPath, ""),
 	)
 	if err != nil {
-		return fmt.Errorf("WriteFolderToVolume3: build container spec: %w", err)
+		return fmt.Errorf("WriteFolderToVolume: build container spec: %w", err)
 	}
 
 	// 2. 이미지 확인/풀

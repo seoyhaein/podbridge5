@@ -335,7 +335,7 @@ func newBuilder(ctx context.Context, store storage.Store, idName string) (*build
 // newAddAndCopyOptions creates default add and copy options.
 func newAddAndCopyOptions() buildah.AddAndCopyOptions {
 	return NewAddAndCopyOptions(
-		WithChmod("0755"),
+		WithChmod("0o755"),
 		WithChown("0:0"),
 		WithHasher(digester.Hash()),
 		WithContextDir("."),
@@ -416,12 +416,12 @@ func saveImage(ctx context.Context, path, imageName, imageId string, compress bo
 
 	// archive 파일이 위치할 디렉토리 생성
 	dir := filepath.Dir(archivePath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("failed to create directory %s: %w", dir, err)
 	}
 
 	// 출력 파일 생성 (명시적으로 파일 권한 설정)
-	outputFile, err := os.OpenFile(archivePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	outputFile, err := os.OpenFile(archivePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
 		return fmt.Errorf("failed to create output file %s: %w", archivePath, err)
 	}
