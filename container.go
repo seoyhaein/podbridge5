@@ -73,6 +73,30 @@ func WithTerminal(terminal bool) ContainerOptions {
 	}
 }
 
+// WithEnv 단일 키/값 환경변수 추가
+func WithEnv(key, value string) ContainerOptions {
+	return func(spec *specgen.SpecGenerator) error {
+		if spec.Env == nil {
+			spec.Env = make(map[string]string)
+		}
+		spec.Env[key] = value
+		return nil
+	}
+}
+
+// WithEnvs 여러 개를 한 번에 추가하고 싶다면 (옵션)
+func WithEnvs(envs map[string]string) ContainerOptions {
+	return func(spec *specgen.SpecGenerator) error {
+		if spec.Env == nil {
+			spec.Env = make(map[string]string)
+		}
+		for k, v := range envs {
+			spec.Env[k] = v
+		}
+		return nil
+	}
+}
+
 func WithCommand(cmd []string) ContainerOptions {
 	return func(spec *specgen.SpecGenerator) error {
 		spec.Command = cmd

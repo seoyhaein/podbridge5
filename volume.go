@@ -101,7 +101,7 @@ func DeleteVolume(ctx context.Context, volumeName string, force *bool) error {
 	return nil
 }
 
-// WriteFolderToVolume TODO 일단 테스트 필요 일단 붙이면서 보자. Command 인자 정정 에러 개연성 문제와 동시성 문제 발생 가능성 확인해볼것. 생각보다 간단한 것도 시간이 걸림.
+// WriteFolderToVolume TODO 일단 테스트 필요 일단 붙이면서 보자. 동시성 문제의 경우 ctx 관련해서 생각해보자. 중요.
 // TODO 부가적으로 시간 또는 퍼센트를 나타내는 것을 추가할지 고민해야 함. 일단 합치는 것 부터 하고 나머지 진행하기로 함.
 func WriteFolderToVolume(parentCtx context.Context, volumeName, mountPath, hostDir string, mode VolumeMode) error {
 	ctx, cancel := context.WithCancel(parentCtx)
@@ -118,57 +118,50 @@ func WriteFolderToVolume(parentCtx context.Context, volumeName, mountPath, hostD
 
 	var vcr *types.VolumeConfigResponse
 
+	// 1. 한 번만 존재 여부 확인
+	exists, err := VolumeExists(ctx, volumeName)
+	if err != nil {
+		return fmt.Errorf("WriteFolderToVolume: check volume existence: %w", err)
+	}
+
 	switch mode {
 	case ModeOverwrite:
+		// OverwriteVolume 내부에서 다시 체크하므로 그대로 호출
 		vcr, err = OverwriteVolume(ctx, volumeName, func(c context.Context, n string) (*types.VolumeConfigResponse, error) {
 			return CreateVolume(c, n, false)
 		})
-		if err != nil {
-			return fmt.Errorf("WriteFolderToVolume: overwrite volume setup: %w", err)
-		}
 
 	case ModeSkip:
-		exists, err := VolumeExists(ctx, volumeName)
-		if err != nil {
-			return fmt.Errorf("WriteFolderToVolume: check existence (skip): %w", err)
-		}
 		if exists {
+			// 이미 있으면 아무 작업 없이 리턴
 			return nil
 		}
 		vcr, err = CreateVolume(ctx, volumeName, false)
-		if err != nil {
-			return fmt.Errorf("WriteFolderToVolume: create volume (skip path): %w", err)
-		}
-
+	// TODO 이 부분은 좀 생각해야 함. 부분적으로 업데이타 가능하고, 가능하다고 해도 해야 하는지 의문임.
+	// TODO 아래 CopyFromArchiveWithOptions 이 메서드에서
+	// opts := &containers.CopyOptions{
+	//    Chown:               &chown,
+	//    Rename:              map[string]string{"/app/logs": "/var/log/myapp"},
+	//    NoOverwriteDirNonDir: nil,  // 덮어쓰기 타입 제어는 기본(false)
+	//} 에서 NoOverwriteDirNonDir 에서 nil 이면 덥어써버림. 일단 이건 생각해서 정리를 해야 함.
 	case ModeUpdate:
-		exists, err := VolumeExists(ctx, volumeName)
-		if err != nil {
-			return fmt.Errorf("WriteFolderToVolume: check existence (update): %w", err)
-		}
 		if !exists {
 			vcr, err = CreateVolume(ctx, volumeName, false)
-			if err != nil {
-				return fmt.Errorf("WriteFolderToVolume: create volume (update path): %w", err)
-			}
 		} else {
-			// 기존 볼륨 재사용
+			// TODO 확인하자.
 			vcr = &types.VolumeConfigResponse{}
 			vcr.Name = volumeName
-			// 필요하면 Inspect:
-			// vcr, _ = volumes.Inspect(ctx, volumeName, nil)
 		}
-
 	default:
 		return fmt.Errorf("WriteFolderToVolume: unknown mode: %d", mode)
 	}
 
-	if vcr == nil {
-		vcr = &types.VolumeConfigResponse{}
-		vcr.Name = volumeName
+	if err != nil {
+		return fmt.Errorf("WriteFolderToVolume: volume setup: %w", err)
 	}
 
 	// 1. 임시 컨테이너 spec
-	spec, err := NewSpec(
+	/*spec, err := NewSpec(
 		WithImageName("docker.io/library/alpine:latest"),
 		WithName("temp-folder-writer"),
 		WithCommand([]string{
@@ -177,7 +170,18 @@ func WriteFolderToVolume(parentCtx context.Context, volumeName, mountPath, hostD
 			"sh", mountPath,
 		}),
 		WithNamedVolume(vcr.Name, mountPath, ""),
+	)*/
+	spec, err := NewSpec(
+		WithImageName("docker.io/library/alpine:latest"),
+		WithName("temp-folder-writer"),
+		WithEnv("MOUNT", mountPath),
+		WithCommand([]string{
+			"sh", "-c",
+			"mkdir -p \"$MOUNT\"; exec tail -f /dev/null",
+		}),
+		WithNamedVolume(vcr.Name, mountPath, ""),
 	)
+
 	if err != nil {
 		return fmt.Errorf("WriteFolderToVolume: build container spec: %w", err)
 	}
@@ -215,7 +219,7 @@ func WriteFolderToVolume(parentCtx context.Context, volumeName, mountPath, hostD
 	pr, pw := io.Pipe()
 	var wg sync.WaitGroup
 	wg.Add(1)
-
+	// TODO tar 를 스트림으로 작성해줌. header 관련해서즌 좀 공부좀 하자. pr, pw 개념은 이해했는데 좀더 숙달하자.
 	go func() {
 		defer wg.Done()
 
@@ -253,7 +257,10 @@ func WriteFolderToVolume(parentCtx context.Context, volumeName, mountPath, hostD
 			}
 
 			var linkTarget string
+			// fi.Mode() 의 비트 패턴 중에서 os.ModeSymlink 플래그(심볼릭 링크를 나타내는 위치에 있는 비트)만 남겨내서(AND 연산 & 연산)
+			// 그 결과가 0이 아니면 “이 파일이 심볼릭 링크다” 라고 판단할 수 있다.
 			if fi.Mode()&os.ModeSymlink != 0 {
+				// 심볼릭 링크의 실제 패스를 가져옴.
 				if lt, lerr := os.Readlink(path); lerr == nil {
 					linkTarget = lt
 				} else {
@@ -293,7 +300,7 @@ func WriteFolderToVolume(parentCtx context.Context, volumeName, mountPath, hostD
 		})
 	}()
 
-	// 5. tar -> 컨테이너 (mountPath)
+	// 5. tar -> 컨테이너 (mountPath), TODO CopyFromArchiveWithOptions 마지막 옵션에서 nil 써서 디폴트로 사용했는데, 이건 위의 내용 살펴봐서 CopyFromArchive 쓸지 고려해보자.
 	copyFunc, err := containers.CopyFromArchiveWithOptions(ctx, containerID, mountPath, pr, nil)
 	if err != nil {
 		cancel()

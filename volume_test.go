@@ -251,9 +251,10 @@ func TestWriteFolderToVolume_Simple(t *testing.T) {
 	if err := WriteFolderToVolume(ctx, volumeName, mountPath, hostDir, ModeUpdate); err != nil {
 		t.Fatalf("WriteFolderToVolume failed: %v", err)
 	}
-
+	// TODO 향후 볼륨 지우는 거 테스트 해야함.
 	// podman volume ls | grep test_wftv_simple
 	// podman volume inspect test_wftv_simple
+	// podman volume rm -f test_wftv_simple
 }
 
 func TestWriteFolderToVolume_ModeSkip_NoOverwrite(t *testing.T) {
