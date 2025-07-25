@@ -320,18 +320,18 @@ func WriteFolderToVolume(parentCtx context.Context, volumeName, mountPath, hostD
 		defer wg.Done()
 
 		tw := tar.NewWriter(pw)
-		defer func() {
-			if cerr := tw.Close(); cerr != nil {
-				Log.Warnf("tar writer close: %v", cerr)
-			}
-		}()
-
 		var walkErr error
 		defer func() {
 			if walkErr != nil {
 				_ = pw.CloseWithError(walkErr)
 			} else {
 				_ = pw.Close()
+			}
+		}()
+
+		defer func() {
+			if cErr := tw.Close(); cErr != nil {
+				Log.Warnf("tar writer close: %v", cErr)
 			}
 		}()
 
