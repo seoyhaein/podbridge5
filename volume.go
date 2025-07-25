@@ -321,11 +321,26 @@ func WriteFolderToVolume(parentCtx context.Context, volumeName, mountPath, hostD
 
 		tw := tar.NewWriter(pw)
 		var walkErr error
+		// TODO (지우지 말것) defer 의 경우 LIFO 방식으로 실행되므로, tw.Close() 가 나중에 실행되고, pw.Close 가 나중에 실행됨.
+		// tw.Close()가 먼저 호출되어 tar footer가 정상 쓰여지고, 그다음에 pw.Close()가 파이프를 닫으므로 에러가 발생하지 않는다.
 		defer func() {
 			if walkErr != nil {
-				_ = pw.CloseWithError(walkErr)
+				// WalkDir 중 에러가 발생했음을 consumer에 전달
+				if cErr := pw.CloseWithError(walkErr); cErr != nil {
+					// 실제 CloseWithError 자체 실패도 함께 로깅
+					Log.Warnf("pipe writer: forwarded walk error (%v), but CloseWithError failed: %v", walkErr, cErr)
+				} else {
+					// 정상적으로 walkErr를 전달했을 때
+					Log.Errorf("pipe writer closed with walk error: %v", walkErr)
+				}
 			} else {
-				_ = pw.Close()
+				// 정상 종료
+				if cErr2 := pw.Close(); cErr2 != nil {
+					Log.Warnf("pipe writer close failed: %v", cErr2)
+				} else {
+					// TODO 향후 Log.Debug 바꾸자. 지금은 이렇게 남겨놓는다.
+					Log.Info("pipe writer closed cleanly")
+				}
 			}
 		}()
 
