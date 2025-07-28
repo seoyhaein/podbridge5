@@ -26,6 +26,7 @@ func WithMount(source, destination, mountType string) ContainerOptions {
 			Type:        mountType,   // "bind"
 			Source:      source,      // 호스트 경로
 			Destination: destination, // 컨테이너 내부 경로
+			Options:     []string{"ro"},
 		})
 		return nil
 	}
