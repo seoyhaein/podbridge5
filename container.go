@@ -73,6 +73,22 @@ func WithTerminal(terminal bool) ContainerOptions {
 	}
 }
 
+func WithSysAdmin() ContainerOptions {
+	return func(spec *specgen.SpecGenerator) error {
+		spec.CapAdd = append(spec.CapAdd, "SYS_ADMIN")
+		return nil
+	}
+}
+
+// WithUnconfinedSeccomp sets the container’s seccomp policy to “unconfined”,
+// allowing syscalls like mount(2) that the default profile would block.
+func WithUnconfinedSeccomp() ContainerOptions {
+	return func(spec *specgen.SpecGenerator) error {
+		spec.SeccompPolicy = "unconfined"
+		return nil
+	}
+}
+
 // WithEnv 단일 키/값 환경변수 추가
 func WithEnv(key, value string) ContainerOptions {
 	return func(spec *specgen.SpecGenerator) error {

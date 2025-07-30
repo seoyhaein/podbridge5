@@ -1,11 +1,15 @@
 package podbridge5
 
 import (
+	"errors"
 	"fmt"
 	"github.com/containers/podman/v5/pkg/specgen"
+	"github.com/containers/storage/pkg/unshare"
 	specgo "github.com/opencontainers/runtime-spec/specs-go"
+	"golang.org/x/sys/unix"
 	"os"
 	"path"
+	"syscall"
 )
 
 // WithMount 컨테이너에서 bind mount 같은 경우 마운트할 디렉토리가 없으면 자동으로 만들어줌. 또한 stop 이나 remove 하면 자동으로 unmount 됨.
@@ -30,6 +34,54 @@ func WithMount(source, destination, mountType string) ContainerOptions {
 		})
 		return nil
 	}
+}
+
+// MountOverlay mounts an OverlayFS at mergedDir, using lowerDir as read-only data
+// and upperDir for writable data, with workDir for internal overlay operations.
+// It handles both root and rootless environments, attempting native overlay in rootless
+// and falling back to fuse-overlayfs if needed.
+func MountOverlay(lowerDir, upperDir, workDir, mergedDir string) error {
+	// 1. Ensure all necessary directories exist
+	for _, dir := range []string{lowerDir, upperDir, workDir, mergedDir} {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("failed to create directory %s: %w", dir, err)
+		}
+	}
+
+	// 2. Prepare mount options
+	baseOpts := fmt.Sprintf("lowerdir=%s,upperdir=%s,workdir=%s", lowerDir, upperDir, workDir)
+
+	// 3. Handle root vs rootless cases
+	if !unshare.IsRootless() {
+		// --- Root Case ---
+		Log.Infoln("Running as root, using native 'overlay'.")
+		if err := unix.Mount("overlay", mergedDir, "overlay", 0, baseOpts); err != nil {
+			return fmt.Errorf("failed to mount overlayfs as root: %w", err)
+		}
+		return nil
+	}
+
+	// --- Rootless Case ---
+	Log.Infoln("Running as rootless, attempting native 'overlay' first.")
+	err := unix.Mount("overlay", mergedDir, "overlay", 0, baseOpts)
+	if err == nil {
+		Log.Infoln("Successfully mounted with native rootless 'overlay'.")
+		return nil
+	}
+
+	// 4. Fallback on expected errors for older kernels
+	if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EINVAL) {
+		Log.Infof("Native rootless mount failed (expected on older kernels): %v. Falling back to 'fuse-overlayfs'.", err)
+		fuseOpts := baseOpts + ",mount_program=/usr/bin/fuse-overlayfs"
+		if fErr := unix.Mount("overlay", mergedDir, "overlay", 0, fuseOpts); fErr != nil {
+			return fmt.Errorf("fallback mount with 'fuse-overlayfs' failed: %w", fErr)
+		}
+		Log.Infoln("Successfully mounted with fallback 'fuse-overlayfs'.")
+		return nil
+	}
+
+	// Unexpected error
+	return fmt.Errorf("native rootless overlayfs mount failed unexpectedly: %w", err)
 }
 
 // WithFileBindings mounts each host file from cellColumns into the container
