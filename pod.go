@@ -13,6 +13,8 @@ import (
 // pod 같은 경우는 일단 파이프라인의 규격이 정해지면 그것에 따라서 api 의 스펙이 확정될 것으로 판단.
 
 // infra container 확인 하고, volume 을 pod 에 넣어두는 것을 생각해보자. 실제로는 infra container 에 넣는 것인데..
+// TODO
+// TODO 지금은 pod 를 하나 만들어주는 것에 끝났는데 여러개의 Pod 를 만들어줘야 하고 Pod 안에서의 컨테이너도 여러개를 만들어주는 상황을 생각하고 이것을 구현하는 메서드를 만들어줘야 한다.
 
 // Pod wraps the entities.PodSpec and the created pod's ID.
 type Pod struct {
