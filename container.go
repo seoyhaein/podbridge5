@@ -73,6 +73,14 @@ func WithTerminal(terminal bool) ContainerOptions {
 	}
 }
 
+// WithPod sets the pod ID for a container spec, allowing the container to join the given pod.
+func WithPod(podID string) ContainerOptions {
+	return func(spec *specgen.SpecGenerator) error {
+		spec.Pod = podID
+		return nil
+	}
+}
+
 func WithSysAdmin() ContainerOptions {
 	return func(spec *specgen.SpecGenerator) error {
 		spec.CapAdd = append(spec.CapAdd, "SYS_ADMIN")

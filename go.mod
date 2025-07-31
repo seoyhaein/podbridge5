@@ -13,6 +13,7 @@ require (
 	github.com/opencontainers/runtime-spec v1.2.0
 	github.com/seoyhaein/utils v0.0.6
 	github.com/sirupsen/logrus v1.9.3
+	golang.org/x/sys v0.24.0
 )
 
 require (
@@ -146,7 +147,6 @@ require (
 	golang.org/x/mod v0.20.0 // indirect
 	golang.org/x/net v0.28.0 // indirect
 	golang.org/x/sync v0.8.0 // indirect
-	golang.org/x/sys v0.24.0 // indirect
 	golang.org/x/term v0.23.0 // indirect
 	golang.org/x/text v0.17.0 // indirect
 	golang.org/x/time v0.5.0 // indirect
